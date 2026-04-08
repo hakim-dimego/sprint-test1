@@ -1,0 +1,1892 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>⚽ Sprint Speed Tracker – AR Edition</title>
+
+  <!--
+  ═══════════════════════════════════════════════════════════════════════
+  TensorFlow.js CDN – Reihenfolge ist kritisch!
+    1. tfjs-core       → Tensor-Grundoperationen & Memory-Management
+    2. tfjs-converter  → Lädt TFLite / GraphModel (benötigt von MoveNet)
+    3. tfjs-backend-webgl → GPU-Beschleunigung via WebGL-Kontext
+    4. pose-detection  → High-Level Wrapper für MoveNet / BlazePose
+  ═══════════════════════════════════════════════════════════════════════
+  -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.20.0/dist/tf-core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.20.0/dist/tf-converter.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.20.0/dist/tf-backend-webgl.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+
+  <style>
+    /* ═══════════════════════════════════════════════════
+       DESIGN-SYSTEM – Variablen & Basis
+    ═══════════════════════════════════════════════════ */
+    :root {
+      --bg:        #080c18;
+      --surface:   #0f1829;
+      --card:      #131d30;
+      --border:    #1e3050;
+      --accent:    #00e5ff;
+      --accent2:   #ff4081;
+      --green:     #00e676;
+      --yellow:    #ffea00;
+      --purple:    #7c4dff;
+      --orange:    #ff9100;
+      --text:      #e2e8f0;
+      --text-dim:  #4a6080;
+      --radius:    14px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* ── HEADER ── */
+    header {
+      width: 100%;
+      background: linear-gradient(135deg, #060c1a 0%, #0a1830 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 18px 10px;
+      text-align: center;
+    }
+    header h1 {
+      font-size: 1.25rem;
+      font-weight: 800;
+      background: linear-gradient(90deg, var(--accent), var(--green));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    header p { font-size: .7rem; color: var(--text-dim); margin-top: 2px; }
+
+    /* ── HAUPT-LAYOUT ── */
+    main {
+      width: 100%;
+      max-width: 480px;
+      padding: 12px 10px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /* ── KARTEN ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+    }
+    .card-title {
+      font-size: .68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.3px;
+      color: var(--accent);
+      margin-bottom: 11px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* ── MODUS-UMSCHALTER ── */
+    .mode-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .mode-tab {
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      color: var(--text-dim);
+      font-size: .78rem;
+      font-weight: 700;
+      padding: 9px 10px;
+      cursor: pointer;
+      text-align: center;
+      transition: all .2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .mode-tab.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(0,229,255,.08);
+      box-shadow: 0 0 14px rgba(0,229,255,.15);
+    }
+    .mode-tab.ar-tab.active {
+      border-color: var(--purple);
+      color: var(--purple);
+      background: rgba(124,77,255,.08);
+      box-shadow: 0 0 14px rgba(124,77,255,.15);
+    }
+    .mode-tab:disabled, .mode-tab[disabled] {
+      opacity: .35;
+      cursor: not-allowed;
+    }
+
+    /* ── VIDEO + CANVAS OVERLAY ── */
+    #videoWrapper {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4/3;
+      background: #000;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 2px solid var(--border);
+    }
+    /* Der WebXR-Modus blendet das normale Video aus und nutzt den XR-Canvas */
+    #video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    /* Skeleton + AR-Overlay Canvas – liegt direkt über dem Video */
+    #skeletonCanvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;        /* Touch-Events durchlassen für Hit-Test-Tap */
+    }
+    /* Hit-Test-Canvas empfängt Berührungen im AR-Modus */
+    #arTouchOverlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      display: none;               /* nur im AR-Modus aktiv */
+      cursor: crosshair;
+      z-index: 10;
+    }
+
+    /* Status-Badge oben links */
+    #statusBadge {
+      position: absolute;
+      top: 8px; left: 8px;
+      background: rgba(0,0,0,.7);
+      backdrop-filter: blur(6px);
+      border-radius: 20px;
+      padding: 4px 10px;
+      font-size: .66rem;
+      font-weight: 600;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      z-index: 20;
+    }
+    #statusDot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      transition: background .3s;
+    }
+    #statusDot.active    { background: var(--green);   box-shadow: 0 0 6px var(--green); }
+    #statusDot.calib     { background: var(--yellow);  box-shadow: 0 0 6px var(--yellow); }
+    #statusDot.measuring { background: var(--accent2); box-shadow: 0 0 6px var(--accent2); }
+    #statusDot.ar        { background: var(--purple);  box-shadow: 0 0 6px var(--purple); }
+
+    /* AR-Distanz-Input-Box oben rechts im Video */
+    #arDistanceBadge {
+      position: absolute;
+      top: 8px; right: 8px;
+      background: rgba(0,0,0,.75);
+      backdrop-filter: blur(6px);
+      border-radius: 10px;
+      padding: 5px 8px;
+      font-size: .65rem;
+      font-weight: 600;
+      color: var(--purple);
+      display: none;
+      z-index: 20;
+      line-height: 1.4;
+    }
+    #arDistanceBadge.visible { display: block; }
+
+    /* ── EINGABEFELDER & BUTTONS ── */
+    .input-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .input-row label { font-size: .78rem; color: var(--text-dim); white-space: nowrap; }
+    input[type="number"] {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: .95rem;
+      font-weight: 600;
+      padding: 9px 12px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input[type="number"]:focus { border-color: var(--accent); }
+
+    .btn {
+      border: none;
+      border-radius: 10px;
+      font-size: .85rem;
+      font-weight: 700;
+      cursor: pointer;
+      padding: 10px 16px;
+      transition: transform .12s, opacity .2s, box-shadow .2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .btn:active { transform: scale(.96); }
+    .btn:disabled { opacity: .35; cursor: not-allowed; }
+
+    .btn-calib  { background: linear-gradient(135deg, #f59e0b, #f97316); color: #000; width: 100%; }
+    .btn-ar     { background: linear-gradient(135deg, #7c4dff, #651fff); color: #fff; width: 100%; }
+    .btn-start  { background: linear-gradient(135deg, var(--green), #00bcd4); color: #000; flex: 1; }
+    .btn-stop   { background: linear-gradient(135deg, var(--accent2), #e91e63); color: #fff; flex: 1; }
+    .btn-reset  { background: var(--surface); color: var(--text-dim); border: 1px solid var(--border); width: 100%; }
+    .btn-ar-reset { background: rgba(124,77,255,.15); color: var(--purple); border: 1px solid rgba(124,77,255,.3); width: 100%; }
+
+    .btn-calib:not(:disabled):hover  { box-shadow: 0 4px 18px rgba(249,115,22,.4); }
+    .btn-ar:not(:disabled):hover     { box-shadow: 0 4px 18px rgba(124,77,255,.4); }
+    .btn-start:not(:disabled):hover  { box-shadow: 0 4px 18px rgba(0,230,118,.4); }
+    .btn-stop:not(:disabled):hover   { box-shadow: 0 4px 18px rgba(255,64,129,.4); }
+
+    .btn-row { display: flex; gap: 10px; }
+
+    /* ── GESCHWINDIGKEITS-ANZEIGE ── */
+    .speed-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .speed-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 12px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .speed-box::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      border-radius: 3px 3px 0 0;
+    }
+    .speed-box.current::before  { background: var(--accent); }
+    .speed-box.topspeed::before { background: var(--accent2); }
+
+    .speed-label { font-size: .63rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 6px; }
+    .speed-value { font-size: 2.3rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+    .speed-unit  { font-size: .68rem; color: var(--text-dim); margin-top: 3px; }
+    .current .speed-value  { color: var(--accent); }
+    .topspeed .speed-value { color: var(--accent2); }
+
+    /* ── KALIBRIERUNGS-INFO ── */
+    #calibInfo {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 13px;
+      font-size: .76rem;
+      line-height: 1.55;
+      display: none;
+    }
+    #calibInfo.visible { display: block; }
+    #calibInfo strong { color: var(--green); }
+
+    /* ── AR-PANEL ── */
+    #arPanel { display: none; }
+    #arPanel.visible { display: block; }
+
+    /* AR-Punkte Fortschritt */
+    .ar-points-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin: 10px 0;
+    }
+    .ar-point-box {
+      background: var(--surface);
+      border: 1.5px dashed var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      text-align: center;
+      font-size: .72rem;
+      transition: all .3s;
+    }
+    .ar-point-box.set {
+      border-style: solid;
+      border-color: var(--purple);
+      background: rgba(124,77,255,.1);
+    }
+    .ar-point-box .pt-label { color: var(--text-dim); margin-bottom: 4px; }
+    .ar-point-box .pt-val   { font-size: .82rem; font-weight: 700; color: var(--purple); }
+
+    /* ── AR-KALIBRIERUNGS-ERGEBNIS ── */
+    #arCalibResult {
+      background: rgba(124,77,255,.08);
+      border: 1px solid rgba(124,77,255,.25);
+      border-radius: 10px;
+      padding: 10px 13px;
+      font-size: .75rem;
+      line-height: 1.55;
+      display: none;
+    }
+    #arCalibResult.visible { display: block; }
+    #arCalibResult strong  { color: var(--purple); }
+
+    /* ── PERSPEKTIV-KORREKTUR BADGE ── */
+    #perspBadge {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 11px;
+      font-size: .72rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 8px;
+      display: none;
+    }
+    #perspBadge.visible { display: flex; }
+    #perspDepth         { font-weight: 700; color: var(--orange); }
+    #perspFactor        { font-weight: 700; color: var(--yellow); }
+
+    /* ── META-INFOS ── */
+    .meta-row  { display: flex; gap: 8px; justify-content: space-between; }
+    .meta-box  {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 8px;
+      font-size: .68rem;
+      text-align: center;
+    }
+    .meta-box span { display: block; font-size: .95rem; font-weight: 700; color: var(--accent); }
+
+    /* ── SPEED BAR ── */
+    #speedBar {
+      height: 4px; background: var(--border);
+      border-radius: 4px; overflow: hidden; margin-top: 10px;
+    }
+    #speedBarFill {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, var(--green), var(--accent), var(--accent2));
+      border-radius: 4px;
+      transition: width .2s ease;
+    }
+
+    /* ── ANLEITUNG ── */
+    .step-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+    .step-list li { display: flex; align-items: flex-start; gap: 10px; font-size: .76rem; line-height: 1.45; color: var(--text-dim); }
+    .step-num {
+      min-width: 21px; height: 21px;
+      background: var(--border);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .62rem; font-weight: 800;
+      color: var(--accent); flex-shrink: 0;
+    }
+    .step-num.ar-step { color: var(--purple); }
+
+    /* ── TOAST ── */
+    #toast {
+      position: fixed;
+      bottom: 22px; left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: #1a2540;
+      border: 1px solid var(--border);
+      border-radius: 30px;
+      padding: 9px 20px;
+      font-size: .8rem; font-weight: 600; color: var(--text);
+      transition: transform .35s cubic-bezier(.34,1.56,.64,1), opacity .35s;
+      opacity: 0; z-index: 999; white-space: nowrap;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+    /* ── LADE-OVERLAY ── */
+    #loadingOverlay {
+      position: fixed; inset: 0;
+      background: rgba(8,12,24,.94);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 18px; z-index: 1000;
+    }
+    #loadingOverlay.hidden { display: none; }
+    .spinner {
+      width: 50px; height: 50px;
+      border: 4px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loadingText { font-size: .88rem; color: var(--text-dim); text-align: center; max-width: 230px; line-height: 1.5; }
+
+    /* ── AR-NICHT-VERFÜGBAR-HINWEIS ── */
+    #arUnsupportedNote {
+      background: rgba(255,144,0,.08);
+      border: 1px solid rgba(255,144,0,.2);
+      border-radius: 10px;
+      padding: 10px 13px;
+      font-size: .74rem;
+      line-height: 1.5;
+      display: none;
+    }
+    #arUnsupportedNote.visible { display: block; }
+    #arUnsupportedNote strong { color: var(--orange); }
+
+    /* Trennlinie */
+    .divider { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+  </style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════
+     LADE-OVERLAY
+════════════════════════════════════════════ -->
+<div id="loadingOverlay">
+  <div class="spinner"></div>
+  <div id="loadingText">Initialisiere TensorFlow.js &amp; MoveNet Thunder…</div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<!-- ════════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════ -->
+<header>
+  <h1>⚽ Sprint Speed Tracker – AR Edition</h1>
+  <p>MoveNet Thunder · WebXR Hit-Test · Echtzeit-Geschwindigkeitsmessung</p>
+</header>
+
+<!-- ════════════════════════════════════════════
+     HAUPT-INHALT
+════════════════════════════════════════════ -->
+<main>
+
+  <!-- ── 1. VIDEO + SKELETON-OVERLAY ── -->
+  <div id="videoWrapper">
+    <video id="video" playsinline autoplay muted></video>
+    <canvas id="skeletonCanvas"></canvas>
+    <!-- Touch-Fläche für WebXR-Hit-Test-Punkte setzen -->
+    <div id="arTouchOverlay"></div>
+    <!-- Status-Badge -->
+    <div id="statusBadge">
+      <div id="statusDot"></div>
+      <span id="statusText">Initialisierung…</span>
+    </div>
+    <!-- AR-Distanz-Info -->
+    <div id="arDistanceBadge" class="visible" style="display:none">
+      <div id="arDistanceLabel">📍 Markiere Startpunkt</div>
+    </div>
+  </div>
+
+  <!-- ── 2. KALIBRIERUNGS-MODUS WÄHLEN ── -->
+  <div class="card">
+    <div class="card-title">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+      Schritt 1 – Kalibrierungsmodus wählen
+    </div>
+
+    <div class="mode-tabs">
+      <button class="mode-tab active" id="tabManual">
+        📐 Manuell (Körpergröße)
+      </button>
+      <button class="mode-tab ar-tab" id="tabAR">
+        🔮 AR-Messmodus (WebXR)
+      </button>
+    </div>
+
+    <!-- ═══ MANUELLER FALLBACK-MODUS ═══ -->
+    <div id="manualPanel">
+      <div class="input-row" style="margin-bottom:10px">
+        <label for="heightInput">Körpergröße (m)</label>
+        <input type="number" id="heightInput" min="1.0" max="2.5" step="0.01" value="1.75" placeholder="z.B. 1.80" />
+      </div>
+      <button class="btn btn-calib" id="calibBtn" disabled>
+        📐 Kalibrieren starten
+      </button>
+      <div id="calibInfo" style="margin-top:10px">
+        ✅ Kalibrierung abgeschlossen:<br/>
+        Spieler-Pixel-Höhe: <strong id="calibPixelHeight">–</strong> px<br/>
+        Skalierungsfaktor: <strong id="calibFactor">–</strong> m/px<br/>
+        Kalibrierungsquelle: <strong>Manuell (Körpergröße)</strong>
+      </div>
+    </div>
+
+    <!-- ═══ AR-MODUS ═══ -->
+    <div id="arPanel">
+
+      <!-- Hinweis wenn WebXR nicht unterstützt -->
+      <div id="arUnsupportedNote">
+        ⚠️ <strong>WebXR (immersive-ar) nicht verfügbar.</strong><br/>
+        Dein Browser unterstützt kein AR-Hit-Test (benötigt Chrome auf Android ≥ ARCore).
+        Der manuelle Fallback-Modus ist weiterhin verfügbar.
+      </div>
+
+      <!-- Distanz-Eingabe für AR-Referenzstrecke -->
+      <div class="input-row" style="margin-bottom:10px">
+        <label for="arDistInput">Referenz­strecke (m)</label>
+        <input type="number" id="arDistInput" min="1" max="50" step="0.5" value="10" placeholder="z.B. 10" />
+      </div>
+      <button class="btn btn-ar" id="arStartBtn" disabled>
+        🔮 AR-Session starten
+      </button>
+      <button class="btn btn-ar-reset" id="arResetBtn" style="margin-top:8px; display:none">
+        🗑️ AR-Punkte zurücksetzen
+      </button>
+
+      <!-- Punkte A und B anzeigen -->
+      <div class="ar-points-row">
+        <div class="ar-point-box" id="arPointA">
+          <div class="pt-label">🟢 Punkt A (Start)</div>
+          <div class="pt-val" id="arPointAVal">nicht gesetzt</div>
+        </div>
+        <div class="ar-point-box" id="arPointB">
+          <div class="pt-label">🔴 Punkt B (Ziel)</div>
+          <div class="pt-val" id="arPointBVal">nicht gesetzt</div>
+        </div>
+      </div>
+
+      <!-- Ergebnis nach AR-Kalibrierung -->
+      <div id="arCalibResult">
+        ✅ AR-Kalibrierung abgeschlossen:<br/>
+        3D-Distanz A→B: <strong id="arReal3dDist">–</strong> m<br/>
+        Pixel-Distanz A→B: <strong id="arPixelDist">–</strong> px<br/>
+        Skalierungsfaktor: <strong id="arCalibFactor">–</strong> m/px<br/>
+        Kalibrierungsquelle: <strong style="color:var(--purple)">WebXR AR Hit-Test</strong>
+      </div>
+
+      <!-- Perspektivkorrektur-Anzeige -->
+      <div id="perspBadge">
+        <span>🎯 Tiefenschätzung Z:</span>
+        <span id="perspDepth">– m</span>
+        <span>|</span>
+        <span>Pers.-Faktor:</span>
+        <span id="perspFactor">1.00×</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 3. MESSUNG STARTEN/STOPPEN ── -->
+  <div class="card">
+    <div class="card-title">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      Schritt 2 – Geschwindigkeitsmessung
+    </div>
+    <div class="btn-row" style="margin-bottom:10px">
+      <button class="btn btn-start" id="startBtn" disabled>▶ Start Messung</button>
+      <button class="btn btn-stop"  id="stopBtn"  disabled>⏹ Stop</button>
+    </div>
+    <button class="btn btn-reset" id="resetBtn">🔄 Alles zurücksetzen</button>
+  </div>
+
+  <!-- ── 4. GESCHWINDIGKEIT ── -->
+  <div class="card">
+    <div class="card-title">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      Live-Geschwindigkeit
+    </div>
+    <div class="speed-grid">
+      <div class="speed-box current">
+        <div class="speed-label">Aktuell</div>
+        <div class="speed-value" id="currentSpeed">0.0</div>
+        <div class="speed-unit">km/h</div>
+      </div>
+      <div class="speed-box topspeed">
+        <div class="speed-label">⚡ Top Speed</div>
+        <div class="speed-value" id="topSpeed">0.0</div>
+        <div class="speed-unit">km/h</div>
+      </div>
+    </div>
+    <div id="speedBar">
+      <div id="speedBarFill"></div>
+    </div>
+  </div>
+
+  <!-- ── 5. META-INFOS ── -->
+  <div class="meta-row">
+    <div class="meta-box"><div>FPS</div><span id="fpsDisplay">–</span></div>
+    <div class="meta-box"><div>Hüft-Konfidenz</div><span id="confDisplay">–</span></div>
+    <div class="meta-box"><div>Frames</div><span id="frameCount">0</span></div>
+    <div class="meta-box"><div>Modus</div><span id="calibModeDisplay" style="font-size:.65rem">–</span></div>
+  </div>
+
+  <!-- ── 6. ANLEITUNG ── -->
+  <div class="card">
+    <div class="card-title">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Anleitung – AR-Modus (WebXR)
+    </div>
+    <ol class="step-list">
+      <li><div class="step-num ar-step">1</div>Wähle „AR-Messmodus" und klicke „AR-Session starten" (Chrome/Android mit ARCore nötig).</li>
+      <li><div class="step-num ar-step">2</div>Tippe auf den <strong>Startpunkt (A)</strong> der Sprint­strecke auf dem Boden – ein grüner Marker erscheint.</li>
+      <li><div class="step-num ar-step">3</div>Tippe auf den <strong>Endpunkt (B)</strong> – das System berechnet die 3D-Distanz und kalibriert automatisch den Pixel/Meter-Faktor.</li>
+      <li><div class="step-num ar-step">4</div>Montiere das Handy auf einem Stativ (Kamera bleibt fixiert). Klicke <strong>„Start Messung"</strong> und der Spieler sprintet.</li>
+      <li><div class="step-num ar-step">5</div>Die Perspektivkorrektur passt den Skalierungsfaktor dynamisch an die Tiefe (Z-Distanz) des Spielers an.</li>
+    </ol>
+    <hr class="divider" style="margin:12px 0"/>
+    <div class="card-title" style="margin-bottom:8px">
+      📐 Anleitung – Manueller Fallback-Modus
+    </div>
+    <ol class="step-list">
+      <li><div class="step-num">1</div>Körpergröße eingeben, aufrecht ins Bild stellen → „Kalibrieren starten".</li>
+      <li><div class="step-num">2</div>Handy auf Stativ fixieren, Sprint starten – Top Speed ablesen.</li>
+    </ol>
+  </div>
+
+</main>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     JAVASCRIPT – Vollständige App-Logik mit WebXR + Fallback
+════════════════════════════════════════════════════════════════════════ -->
+<script>
+/*
+╔═══════════════════════════════════════════════════════════════════════╗
+║  SPRINT SPEED TRACKER – AR EDITION                                    ║
+║                                                                       ║
+║  Kalibrierungsmodi (priorisiert in dieser Reihenfolge):              ║
+║  1. WebXR Hit-Test (AR): 2 Bodenpunkte in 3D markieren →             ║
+║     automatischer m/px Faktor + perspektivische Tiefenkorrektur      ║
+║  2. Manuell (Fallback): Körpergröße eingeben → Pixel-Höhe messen     ║
+║                                                                       ║
+║  Geschwindigkeits-Pipeline:                                           ║
+║  hipX_px → × meterPerPixel_eff → m/s → × 3.6 → km/h                ║
+║  meterPerPixel_eff = meterPerPixel × perspFactor(z)                  ║
+╚═══════════════════════════════════════════════════════════════════════╝
+*/
+
+// ─────────────────────────────────────────────
+// DOM-Referenzen
+// ─────────────────────────────────────────────
+const video             = document.getElementById('video');
+const canvas            = document.getElementById('skeletonCanvas');
+const ctx               = canvas.getContext('2d');
+const arTouchOverlay    = document.getElementById('arTouchOverlay');
+
+const calibBtn          = document.getElementById('calibBtn');
+const startBtn          = document.getElementById('startBtn');
+const stopBtn           = document.getElementById('stopBtn');
+const resetBtn          = document.getElementById('resetBtn');
+
+const heightInput       = document.getElementById('heightInput');
+const calibInfo         = document.getElementById('calibInfo');
+const calibPixelEl      = document.getElementById('calibPixelHeight');
+const calibFactorEl     = document.getElementById('calibFactor');
+
+const currentSpeedEl    = document.getElementById('currentSpeed');
+const topSpeedEl        = document.getElementById('topSpeed');
+const speedBarFill      = document.getElementById('speedBarFill');
+const fpsDisplay        = document.getElementById('fpsDisplay');
+const confDisplay       = document.getElementById('confDisplay');
+const frameCountEl      = document.getElementById('frameCount');
+const calibModeDisplay  = document.getElementById('calibModeDisplay');
+
+const statusDot         = document.getElementById('statusDot');
+const statusText        = document.getElementById('statusText');
+const loadingOverlay    = document.getElementById('loadingOverlay');
+const loadingText       = document.getElementById('loadingText');
+const toast             = document.getElementById('toast');
+
+// AR-UI-Elemente
+const tabManual         = document.getElementById('tabManual');
+const tabAR             = document.getElementById('tabAR');
+const manualPanel       = document.getElementById('manualPanel');
+const arPanel           = document.getElementById('arPanel');
+const arStartBtn        = document.getElementById('arStartBtn');
+const arResetBtn        = document.getElementById('arResetBtn');
+const arUnsupportedNote = document.getElementById('arUnsupportedNote');
+const arDistInput       = document.getElementById('arDistInput');
+const arPointAEl        = document.getElementById('arPointA');
+const arPointBEl        = document.getElementById('arPointB');
+const arPointAValEl     = document.getElementById('arPointAVal');
+const arPointBValEl     = document.getElementById('arPointBVal');
+const arCalibResult     = document.getElementById('arCalibResult');
+const arReal3dDistEl    = document.getElementById('arReal3dDist');
+const arPixelDistEl     = document.getElementById('arPixelDist');
+const arCalibFactorEl   = document.getElementById('arCalibFactor');
+const arDistanceBadge   = document.getElementById('arDistanceBadge');
+const arDistanceLabel   = document.getElementById('arDistanceLabel');
+const perspBadge        = document.getElementById('perspBadge');
+const perspDepthEl      = document.getElementById('perspDepth');
+const perspFactorEl     = document.getElementById('perspFactor');
+
+
+// ─────────────────────────────────────────────
+// GLOBALER APP-ZUSTAND
+// ─────────────────────────────────────────────
+let detector       = null;   // MoveNet-Detektor-Instanz
+let animFrameId    = null;   // requestAnimationFrame-Handle
+let appMode        = 'idle'; // 'idle' | 'calibrating' | 'measuring'
+let calibMode      = 'manual'; // 'manual' | 'ar'
+
+// ── Kalibrierungs-Daten ──
+let meterPerPixel  = null;   // Basis-Skalierungsfaktor [m/px] aus Kalibrierung
+let calibSamples   = [];     // Samples für manuelle Kalibrierung
+const CALIB_FRAMES = 30;
+
+// ── Messdaten ──
+let lastHipX       = null;   // Letzte Hüft-X-Position (Video-Koordinaten, px)
+let lastHipZ       = null;   // Letzte geschätzte Z-Tiefe (Meter) für Perspektivkorrektur
+let lastTimestamp  = null;   // letzter Frame-Zeitstempel (ms)
+let topSpeedKmh    = 0;
+let framesMeasured = 0;
+
+// ── FPS ──
+let fpsFrames      = 0;
+let fpsLastTime    = performance.now();
+let fpsValue       = 0;
+
+// ── Geschwindigkeitsglättung ──
+let emaSpeed       = 0;      // Exponential Moving Average
+const EMA_ALPHA    = 0.35;   // Glättungsfaktor (0=sehr träge, 1=kein Glätten)
+
+/*
+ ┌──────────────────────────────────────────────────────────────────────┐
+ │ WEBXR – AR-ZUSTANDS-VARIABLEN                                        │
+ │                                                                      │
+ │ xrSession       → aktive XRSession (immersive-ar)                    │
+ │ xrRefSpace      → 'local' Referenzraum (Ursprung = Kameraposition    │
+ │                   beim Session-Start)                                 │
+ │ xrViewerSpace   → 'viewer' Referenzraum (Kameraoptik-Zentrum)        │
+ │ hitTestSource   → XRHitTestSource – liefert pro Frame                │
+ │                   Trefferpunkte auf erkannten Ebenen (Boden)         │
+ │ arPointA/B      → 3D-Weltkoordinaten (XRPose.transform.position)    │
+ │                   der beiden markierten Bodenpunkte                  │
+ │ arPointA_px/B_px→ Projektierte 2D-Bildpixel-Koordinaten             │
+ │ arCalibrated    → Flag: AR-Kalibrierung abgeschlossen                │
+ │ cameraViewMatrix→ Aktuelle 4×4 View-Matrix der Kamera               │
+ │                   (aus frame.getViewerPose().views[0].transform.     │
+ │                   inverse.matrix) – wird für Tiefen-Berechnung       │
+ │                   des Spielers verwendet                              │
+ │ projMatrix      → 4×4 Projektionsmatrix der Kamera (für px→3D)      │
+ └──────────────────────────────────────────────────────────────────────┘
+*/
+let xrSession        = null;
+let xrRefSpace       = null;
+let xrViewerSpace    = null;
+let hitTestSource    = null;
+let arPointA         = null;  // { x, y, z } in Weltkoordinaten [m]
+let arPointB         = null;
+let arPointA_px      = null;  // { x, y } in Canvas-Pixeln
+let arPointB_px      = null;
+let arCalibrated     = false;
+let cameraViewMatrix = null;  // Float32Array, 4×4 column-major
+let projMatrix       = null;  // Float32Array, 4×4 column-major
+let arWebGLLayer     = null;
+let currentHitResult = null;  // Aktueller Hit-Test-Treffer (für Cursor-Anzeige)
+let arRefDist3D      = 0;     // Reale 3D-Distanz A→B [m]
+let arRefDistPx      = 0;     // Pixel-Distanz A→B auf Kamerabild [px]
+
+// Referenz-Kamera-Z für perspektivische Korrektur
+let refCameraZ       = null;  // Z-Distanz der Kamera zum Ursprung bei Kalibrierung
+let perspFactor      = 1.0;   // Aktueller perspektivischer Korrekturfaktor
+
+
+// ─────────────────────────────────────────────────────────────────────
+// HILFSFUNKTIONEN
+// ─────────────────────────────────────────────────────────────────────
+
+function showToast(msg, dur = 3200) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), dur);
+}
+
+function setStatus(mode, text) {
+  statusDot.className = '';
+  if (mode) statusDot.classList.add(mode);
+  statusText.textContent = text;
+}
+
+function resetSpeedDisplay() {
+  currentSpeedEl.textContent = '0.0';
+  topSpeedEl.textContent     = '0.0';
+  speedBarFill.style.width   = '0%';
+  fpsDisplay.textContent     = '–';
+  confDisplay.textContent    = '–';
+  frameCountEl.textContent   = '0';
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// WEBXR SUPPORT-CHECK
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Prüft ob der Browser WebXR mit immersive-ar und hit-test unterstützt.
+ * Gibt true zurück wenn verfügbar, sonst false.
+ */
+async function checkWebXRSupport() {
+  if (!navigator.xr) return false;
+  try {
+    return await navigator.xr.isSessionSupported('immersive-ar');
+  } catch (e) {
+    return false;
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────
+// KAMERA INITIALISIEREN (normaler getUserMedia-Modus)
+// ─────────────────────────────────────────────────────────────────────
+async function initCamera() {
+  loadingText.textContent = 'Aktiviere Rückkamera…';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width:  { ideal: 1280 },
+        height: { ideal: 720  },
+      },
+      audio: false,
+    });
+    video.srcObject = stream;
+    await new Promise(r => video.addEventListener('loadedmetadata', r, { once: true }));
+    await video.play();
+    return true;
+  } catch (err) {
+    console.error('Kamera-Fehler:', err);
+    showToast('❌ Kamerazugriff verweigert.', 5000);
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// MOVENET THUNDER LADEN
+// ─────────────────────────────────────────────────────────────────────
+async function loadModel() {
+  loadingText.textContent = 'Lade MoveNet Thunder… (10–30 s)';
+  try {
+    await tf.setBackend('webgl');
+    await tf.ready();
+    detector = await poseDetection.createDetector(
+      poseDetection.SupportedModels.MoveNet,
+      { modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER }
+    );
+    return true;
+  } catch (err) {
+    console.error('Modell-Fehler:', err);
+    showToast('❌ Modell konnte nicht geladen werden.', 6000);
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// CANVAS SYNCHRONISIEREN
+// ─────────────────────────────────────────────────────────────────────
+function syncCanvasSize() {
+  const rect = video.getBoundingClientRect();
+  canvas.width  = rect.width;
+  canvas.height = rect.height;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// KEYPOINT SKALIERUNG (Video-Koordinaten → Canvas-Koordinaten)
+// ─────────────────────────────────────────────────────────────────────
+function scaleKP(kp) {
+  const sx = canvas.width  / video.videoWidth;
+  const sy = canvas.height / video.videoHeight;
+  return { x: kp.x * sx, y: kp.y * sy, score: kp.score };
+}
+
+// Skeleton-Verbindungen (COCO-17)
+const SKELETON_CONNECTIONS = [
+  [0,1],[0,2],[1,3],[2,4],
+  [5,6],[5,7],[7,9],[6,8],[8,10],
+  [5,11],[6,12],[11,12],
+  [11,13],[13,15],[12,14],[14,16],
+];
+const MIN_CONFIDENCE = 0.25;
+
+// ─────────────────────────────────────────────────────────────────────
+// SKELETT ZEICHNEN
+// ─────────────────────────────────────────────────────────────────────
+function drawSkeleton(keypoints) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!keypoints || keypoints.length === 0) {
+    drawAROverlay(); // AR-Linien auch ohne Keypoints zeichnen
+    return;
+  }
+  const kps = keypoints.map(scaleKP);
+
+  // Knochen
+  ctx.lineWidth = 2.5;
+  for (const [i, j] of SKELETON_CONNECTIONS) {
+    const a = kps[i], b = kps[j];
+    if (!a || !b || a.score < MIN_CONFIDENCE || b.score < MIN_CONFIDENCE) continue;
+    const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+    grad.addColorStop(0, 'rgba(0,229,255,0.85)');
+    grad.addColorStop(1, 'rgba(0,230,118,0.85)');
+    ctx.strokeStyle = grad;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+
+  // Keypoints
+  for (let i = 0; i < kps.length; i++) {
+    const kp = kps[i];
+    if (!kp || kp.score < MIN_CONFIDENCE) continue;
+    const isHip = (i === 11 || i === 12);
+    ctx.beginPath();
+    ctx.arc(kp.x, kp.y, isHip ? 7 : 4, 0, Math.PI * 2);
+    ctx.fillStyle = isHip ? 'rgba(255,64,129,0.95)' : 'rgba(0,229,255,0.9)';
+    ctx.fill();
+    if (isHip) {
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText('HIP', kp.x + 9, kp.y + 4);
+    }
+  }
+
+  // AR-Overlay obendrauf
+  drawAROverlay();
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// AR-OVERLAY ZEICHNEN
+// Zeichnet Startlinie, Ziellinie und Cursor auf dem Canvas
+// ─────────────────────────────────────────────────────────────────────
+function drawAROverlay() {
+  if (!arCalibrated && !arPointA_px && !currentHitResult) return;
+
+  // ── Hit-Test-Cursor (Fadenkreuz) ──
+  if (currentHitResult && !arCalibrated) {
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    ctx.strokeStyle = 'rgba(124,77,255,0.9)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, 18, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx - 26, cy); ctx.lineTo(cx + 26, cy);
+    ctx.moveTo(cx, cy - 26); ctx.lineTo(cx, cy + 26);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(124,77,255,0.7)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ── Punkt A (grüner Marker + Startlinie) ──
+  if (arPointA_px) {
+    const px = arPointA_px.x * (canvas.width / video.videoWidth);
+    const py = arPointA_px.y * (canvas.height / video.videoHeight);
+
+    // Vertikale Startlinie
+    ctx.strokeStyle = 'rgba(0,230,118,0.85)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([8, 4]);
+    ctx.beginPath();
+    ctx.moveTo(px, 0); ctx.lineTo(px, canvas.height);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Marker
+    ctx.fillStyle = 'rgba(0,230,118,0.25)';
+    ctx.beginPath(); ctx.arc(px, py, 20, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#00e676'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(px, py, 20, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#00e676';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText('START', px + 24, py + 4);
+  }
+
+  // ── Punkt B (roter Marker + Ziellinie) ──
+  if (arPointB_px) {
+    const px = arPointB_px.x * (canvas.width / video.videoWidth);
+    const py = arPointB_px.y * (canvas.height / video.videoHeight);
+
+    ctx.strokeStyle = 'rgba(255,64,129,0.85)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([8, 4]);
+    ctx.beginPath();
+    ctx.moveTo(px, 0); ctx.lineTo(px, canvas.height);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = 'rgba(255,64,129,0.25)';
+    ctx.beginPath(); ctx.arc(px, py, 20, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#ff4081'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(px, py, 20, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#ff4081';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText('ZIEL', px + 24, py + 4);
+  }
+
+  // ── Boden-Verbindungslinie A→B ──
+  if (arPointA_px && arPointB_px) {
+    const ax = arPointA_px.x * (canvas.width / video.videoWidth);
+    const ay = arPointA_px.y * (canvas.height / video.videoHeight);
+    const bx = arPointB_px.x * (canvas.width / video.videoWidth);
+    const by = arPointB_px.y * (canvas.height / video.videoHeight);
+    const grad = ctx.createLinearGradient(ax, ay, bx, by);
+    grad.addColorStop(0, 'rgba(0,230,118,0.6)');
+    grad.addColorStop(1, 'rgba(255,64,129,0.6)');
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([10, 6]);
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  WEBXR – AR HIT-TEST INTEGRATION
+//
+//  Architektur:
+//  ┌─────────────────────────────────────────────────────────────────┐
+//  │  XRSession (immersive-ar, hit-test feature)                     │
+//  │    │                                                            │
+//  │    ├─ xrRefSpace ('local') → Weltkoordinaten-Ursprung           │
+//  │    │   Dieser Raum ist stabil und bewegt sich nicht mit der     │
+//  │    │   Kamera. Alle 3D-Punkte (A, B) werden hier gespeichert.  │
+//  │    │                                                            │
+//  │    ├─ xrViewerSpace ('viewer') → Kameraoptik                   │
+//  │    │   Bewegt sich mit der Kamera. Wird als Ursprung für        │
+//  │    │   den Hit-Test-Strahl verwendet.                           │
+//  │    │                                                            │
+//  │    └─ hitTestSource → pro Frame: getHitTestResults()           │
+//  │        Gibt Array von XRHitTestResult zurück.                   │
+//  │        Jedes Ergebnis: .getPose(xrRefSpace).transform           │
+//  │                                                                 │
+//  │  Kamera-View-Matrix:                                            │
+//  │    frame.getViewerPose(xrRefSpace).views[0].transform.matrix   │
+//  │    = 4×4 Matrix (column-major Float32Array)                     │
+//  │    Diese Matrix transformiert von Kameraraum → Weltraum.        │
+//  │    Invertiert ergibt sie: Weltraum → Kameraraum (View-Matrix). │
+//  └─────────────────────────────────────────────────────────────────┘
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Startet eine WebXR immersive-ar Session mit Hit-Test-Feature.
+ * Im AR-Modus übernimmt WebXR die Kamera, das video-Element wird
+ * nicht mehr für die Anzeige verwendet (WebXR rendert direkt).
+ */
+async function startARSession() {
+  try {
+    // Session mit hit-test und dom-overlay Features anfragen
+    xrSession = await navigator.xr.requestSession('immersive-ar', {
+      requiredFeatures: ['hit-test'],
+      optionalFeatures: ['dom-overlay', 'local'],
+      domOverlay: { root: document.getElementById('videoWrapper') }
+    });
+
+    // WebGL-Kontext für XR-Rendering vorbereiten
+    // Da wir TF.js WebGL bereits initialisiert haben, holen wir dessen Canvas
+    const tfCanvas = document.createElement('canvas');
+    const gl = tfCanvas.getContext('webgl', { xrCompatible: true });
+
+    // XR-kompatiblen WebGL-Kontext anfordern
+    await gl.makeXRCompatible();
+    arWebGLLayer = new XRWebGLLayer(xrSession, gl);
+    xrSession.updateRenderState({ baseLayer: arWebGLLayer });
+
+    // Referenzräume anfordern
+    // 'local' = stabiler Weltkoordinatenraum (Ursprung bei Session-Start)
+    xrRefSpace    = await xrSession.requestReferenceSpace('local');
+    // 'viewer' = Kameraoptik-Raum (bewegt sich mit der Kamera)
+    xrViewerSpace = await xrSession.requestReferenceSpace('viewer');
+
+    // Hit-Test-Quelle erstellen
+    // Der Strahl geht vom Viewer (Kamerazentrum) aus geradeaus (0,0,-1 in Viewer-Space)
+    hitTestSource = await xrSession.requestHitTestSource({ space: xrViewerSpace });
+
+    // Session-Event-Handler
+    xrSession.addEventListener('end', onARSessionEnd);
+
+    // AR-Touch-Overlay für Punkt-Markierung aktivieren
+    arTouchOverlay.style.display = 'block';
+    arDistanceBadge.style.display = 'block';
+
+    // UI für AR-Modus
+    arStartBtn.textContent = '⏹ AR-Session beenden';
+    arStartBtn.onclick = stopARSession;
+    arResetBtn.style.display = 'block';
+    setStatus('ar', 'AR aktiv – Punkt A tippen');
+    showToast('🔮 AR-Session aktiv! Tippe auf den Startpunkt (A).', 4000);
+
+    // WebXR-Render-Loop starten
+    xrSession.requestAnimationFrame(onXRFrame);
+
+  } catch (err) {
+    console.error('AR-Session-Fehler:', err);
+    showToast(`❌ AR-Fehler: ${err.message}`, 5000);
+    xrSession = null;
+  }
+}
+
+/**
+ * Beendet die AR-Session und kehrt zum normalen Kamera-Modus zurück.
+ */
+function stopARSession() {
+  if (xrSession) {
+    hitTestSource?.cancel();
+    hitTestSource = null;
+    xrSession.end();
+  }
+}
+
+function onARSessionEnd() {
+  xrSession     = null;
+  xrRefSpace    = null;
+  xrViewerSpace = null;
+  hitTestSource = null;
+  arTouchOverlay.style.display = 'none';
+  arDistanceBadge.style.display = 'none';
+  arStartBtn.textContent = '🔮 AR-Session starten';
+  arStartBtn.onclick = startARSession;
+  setStatus('active', 'AR-Session beendet');
+  showToast('AR-Session geschlossen.');
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  WEBXR FRAME-LOOP (onXRFrame)
+//
+//  Dieser Loop läuft parallel zum normalen detectionLoop().
+//  Pro Frame:
+//    1. Hit-Test-Ergebnis holen (Bodenpunkt unter Kamera-Crosshair)
+//    2. Kamera-View-Matrix und Projektionsmatrix extrahieren
+//    3. Skelett-Overlay via MoveNet zeichnen (auf separatem Canvas)
+//    4. Perspektivkorrektur berechnen
+// ─────────────────────────────────────────────────────────────────────
+function onXRFrame(timestamp, frame) {
+  if (!xrSession) return;
+
+  // Nächsten Frame anfordern
+  xrSession.requestAnimationFrame(onXRFrame);
+
+  // ── 1. Kamera-Pose holen (enthält View-Matrix + Projektionsmatrix) ──
+  const viewerPose = frame.getViewerPose(xrRefSpace);
+  if (viewerPose && viewerPose.views.length > 0) {
+    const view = viewerPose.views[0];
+
+    /*
+     ┌─────────────────────────────────────────────────────────────────┐
+     │  VIEW-MATRIX ERKLÄRUNG:                                         │
+     │                                                                  │
+     │  view.transform.matrix  = Camera-to-World-Matrix (4×4)          │
+     │    → Transformiert Punkte vom Kameraraum in den Weltkoord.-Raum  │
+     │    → Spalte 3 (Indizes 12,13,14) = Kameraposition in der Welt   │
+     │                                                                  │
+     │  cameraViewMatrix (= inverse) = World-to-Camera-Matrix           │
+     │    → Transformiert Weltpunkte in Kameraraum-Koordinaten          │
+     │    → Z-Komponente nach Transform = Tiefe vor der Kamera (m)     │
+     │                                                                  │
+     │  projMatrix = Projektionsmatrix                                  │
+     │    → Transformiert Kameraraum → normierte Gerätekoord. (NDC)    │
+     │    → NDC (x∈[-1,1], y∈[-1,1]) → × Viewport → Pixel-Koordinaten │
+     │    → Wird benötigt um 3D-Weltpunkte auf den Bildschirm zu       │
+     │      projizieren (für Anzeige der A/B-Marker)                   │
+     └─────────────────────────────────────────────────────────────────┘
+    */
+    cameraViewMatrix = mat4Invert(view.transform.matrix);
+    projMatrix       = view.projectionMatrix;
+  }
+
+  // ── 2. Hit-Test-Ergebnis ──
+  if (hitTestSource) {
+    const hits = frame.getHitTestResults(hitTestSource);
+    if (hits.length > 0) {
+      currentHitResult = hits[0];
+    } else {
+      currentHitResult = null;
+    }
+  }
+
+  // ── 3. Perspektivkorrektur wenn Kalibrierung fertig ──
+  if (arCalibrated && cameraViewMatrix) {
+    perspFactor = computePerspFactor();
+    perspDepthEl.textContent  = lastHipZ ? lastHipZ.toFixed(2) + ' m' : '– m';
+    perspFactorEl.textContent = perspFactor.toFixed(3) + '×';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  HIT-TEST: PUNKT MARKIEREN (Touch auf arTouchOverlay)
+//
+//  Wenn der User auf das AR-Overlay tippt, wird die aktuelle
+//  Hit-Test-Position (currentHitResult) als Punkt A oder B gespeichert.
+// ─────────────────────────────────────────────────────────────────────
+arTouchOverlay.addEventListener('click', (e) => {
+  if (!currentHitResult || !xrRefSpace) return;
+
+  // 3D-Pose des Trefferpunkts im Welt-Referenzraum
+  const pose = currentHitResult.getPose(xrRefSpace);
+  if (!pose) return;
+
+  // 3D-Weltkoordinaten des Bodenpunkts (in Metern)
+  const pos3D = {
+    x: pose.transform.position.x,
+    y: pose.transform.position.y,
+    z: pose.transform.position.z,
+  };
+
+  // 2D-Projektion auf den Kamera-Frame (für Overlay-Anzeige)
+  // Verwende Bildschirmmitte als Näherung für den Hit-Test-Punkt
+  // (da der Hit-Test-Strahl vom Bildschirmzentrum ausgeht)
+  const pos2D = {
+    x: video.videoWidth  / 2,
+    y: video.videoHeight / 2,
+  };
+
+  if (!arPointA) {
+    // ── Punkt A setzen ──
+    arPointA    = pos3D;
+    arPointA_px = pos2D;
+    arPointAEl.classList.add('set');
+    arPointAValEl.textContent = `x:${pos3D.x.toFixed(2)} z:${pos3D.z.toFixed(2)}`;
+    arDistanceLabel.textContent = '📍 Markiere Zielpunkt (B)';
+    setStatus('ar', 'Punkt A gesetzt – Zielpunkt B tippen');
+    showToast('✅ Punkt A gesetzt! Bewege dich zum Ziel und tippe auf Punkt B.', 4000);
+
+  } else if (!arPointB) {
+    // ── Punkt B setzen ──
+    arPointB    = pos3D;
+    arPointB_px = pos2D;
+    arPointBEl.classList.add('set');
+    arPointBValEl.textContent = `x:${pos3D.x.toFixed(2)} z:${pos3D.z.toFixed(2)}`;
+
+    // AR-Kalibrierung berechnen
+    computeARCalibration();
+    arDistanceBadge.style.display = 'none';
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+//  AR-KALIBRIERUNG BERECHNEN
+//
+//  Sobald beide Bodenpunkte A und B gesetzt sind:
+//  1. Euklidische 3D-Distanz berechnen (echte Meter)
+//  2. Pixel-Distanz auf dem Kamerabild messen
+//  3. meterPerPixel = 3D-Distanz / Pixel-Distanz
+//
+//  Zusätzlich: Referenz-Z-Distanz speichern für Perspektivkorrektur
+// ─────────────────────────────────────────────────────────────────────
+function computeARCalibration() {
+  if (!arPointA || !arPointB) return;
+
+  // ── Euklidische 3D-Distanz (echte Meter via Satz des Pythagoras) ──
+  // Da beide Punkte auf dem Boden liegen (Y ≈ konstant), reicht XZ-Ebene,
+  // aber wir nehmen alle 3 Achsen für maximale Genauigkeit.
+  const dx3D = arPointB.x - arPointA.x;
+  const dy3D = arPointB.y - arPointA.y;
+  const dz3D = arPointB.z - arPointA.z;
+  arRefDist3D = Math.sqrt(dx3D*dx3D + dy3D*dy3D + dz3D*dz3D);
+
+  // ── Pixel-Distanz auf dem Kamerabild ──
+  // Da wir den Hit-Test immer vom Bildschirmzentrum aus machen,
+  // nutzen wir die eingestellte Referenzstrecke als Skalierung.
+  // Für eine genauere Pixel-Distanz: Nutzer soll A von links nach rechts markieren.
+  const dxPx = Math.abs(arPointB_px.x - arPointA_px.x);
+  const dyPx = Math.abs(arPointB_px.y - arPointA_px.y);
+  arRefDistPx = Math.sqrt(dxPx*dxPx + dyPx*dyPx);
+
+  // Fallback: Wenn Pixel-Distanz 0 (gleicher Bildschirmpunkt),
+  // nutzen wir die eingegebene Referenzstrecke und schätzen Pixel aus Kamerabild
+  if (arRefDistPx < 10) {
+    // Fallback: Nehme Videobreite als Anhaltspunkt
+    // Annahme: Referenzstrecke nimmt ~60% der Bildbreite ein
+    arRefDistPx = video.videoWidth * 0.6;
+    showToast('⚠️ Pixel-Distanz zu gering – schätze aus Kamerabild.', 3500);
+  }
+
+  // ── Skalierungsfaktor ──
+  // meterPerPixel = echte 3D-Distanz [m] / Pixel-Distanz [px]
+  meterPerPixel = arRefDist3D / arRefDistPx;
+
+  // Referenz-Z-Distanz der Kamera zum Boden-Mittelpunkt speichern
+  // Wird für die perspektivische Korrektur benötigt
+  const midZ = (arPointA.z + arPointB.z) / 2;
+  refCameraZ  = Math.abs(midZ);
+
+  arCalibrated = true;
+  calibMode    = 'ar';
+  calibModeDisplay.textContent = 'AR WebXR';
+
+  // ── UI aktualisieren ──
+  arCalibResult.classList.add('visible');
+  arReal3dDistEl.textContent  = arRefDist3D.toFixed(3);
+  arPixelDistEl.textContent   = arRefDistPx.toFixed(1);
+  arCalibFactorEl.textContent = meterPerPixel.toFixed(6);
+  perspBadge.classList.add('visible');
+
+  startBtn.disabled = false;
+  setStatus('active', 'AR-Kalibrierung ✅ – bereit zur Messung');
+  showToast(`✅ AR-Kalibriert! ${arRefDist3D.toFixed(2)} m = ${arRefDistPx.toFixed(0)} px`, 4000);
+
+  console.log(`🔮 AR-Kalibrierung:
+    3D-Distanz: ${arRefDist3D.toFixed(4)} m
+    Pixel-Distanz: ${arRefDistPx.toFixed(1)} px
+    meterPerPixel: ${meterPerPixel.toFixed(7)} m/px
+    Referenz-Z: ${refCameraZ?.toFixed(3)} m`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  PERSPEKTIVISCHE KORREKTUR
+//
+//  Wenn sich der Spieler in der Tiefe (Z-Achse) bewegt, erscheinen
+//  gleiche Bewegungen näher/weiter als unterschiedlich groß im Bild.
+//
+//  Prinzip der perspektivischen Projektion:
+//    pixel_size ∝ 1 / Z  (Objekte werden kleiner mit wachsender Tiefe)
+//
+//  Daher gilt für den Maßstab:
+//    meterPerPixel_effektiv = meterPerPixel_ref × (Z_aktuell / Z_ref)
+//
+//  Die Formel leitet sich aus der Lochkameragleichung ab:
+//    x_px = f × X_m / Z_m  →  X_m = x_px × Z_m / f
+//  Der Faktor f/Z_ref ist in meterPerPixel eingebakken.
+//  Wenn Z sich ändert, skaliert meterPerPixel linear mit Z:
+//    meterPerPixel(Z) = meterPerPixel(Z_ref) × Z / Z_ref
+//
+//  perspFactor = Z_aktuell / Z_ref
+//    > 1.0 → Spieler ist weiter weg → scheinbar kleiner → mehr m/px
+//    < 1.0 → Spieler ist näher    → scheinbar größer → weniger m/px
+// ═══════════════════════════════════════════════════════════════════════
+function computePerspFactor() {
+  if (!refCameraZ || !cameraViewMatrix || refCameraZ === 0) return 1.0;
+
+  // lastHipZ wird im Messloop gesetzt (Tiefe des Spielers)
+  if (lastHipZ === null || lastHipZ === undefined) return 1.0;
+
+  // Verhältnis aktuelle Z-Tiefe zu Referenz-Z bei Kalibrierung
+  // perspFactor > 1 = Spieler weiter entfernt als bei Kalibrierung
+  const factor = Math.abs(lastHipZ) / refCameraZ;
+
+  // Clamp: Maximal ±50% Korrektur um extreme Werte zu vermeiden
+  return Math.max(0.5, Math.min(2.5, factor));
+}
+
+/**
+ * Schätzt die Z-Tiefe eines Körperpunkts (z.B. Hüfte) im 3D-Raum
+ * aus der Hüftgröße in Pixeln.
+ *
+ * Methode: Verhältnis der aktuellen Hüftbreite (px) zur
+ * Referenzhüftbreite bei bekannter Distanz.
+ *
+ * Wenn WebXR verfügbar: Z-Tiefe aus cameraViewMatrix abschätzbar.
+ * Wenn kein AR: Grobe Schätzung aus Pixel-Verhältnis zu Referenz.
+ *
+ * @param {Object} keypoints - MoveNet-Keypoints
+ * @returns {number|null} Geschätzte Tiefe in Metern (positiv = vor Kamera)
+ */
+function estimatePlayerDepth(keypoints) {
+  if (!keypoints) return null;
+
+  const lHip = keypoints[11];
+  const rHip = keypoints[12];
+
+  if (!lHip || !rHip ||
+      lHip.score < MIN_CONFIDENCE ||
+      rHip.score < MIN_CONFIDENCE) return null;
+
+  // Horizontale Hüftbreite in Bildschirmpixeln
+  const hipWidthPx = Math.abs(rHip.x - lHip.x);
+
+  if (calibMode === 'ar' && refCameraZ && meterPerPixel) {
+    /*
+     ┌─────────────────────────────────────────────────────────────────┐
+     │  TIEFENSCHÄTZUNG via Hüftbreite                                  │
+     │                                                                  │
+     │  Annahme: Hüftbreite eines Erwachsenen ≈ 0.35 m                 │
+     │  Aus der Lochkameragleichung:                                    │
+     │    Z = (Reale Breite × Brennweite) / Pixel-Breite               │
+     │  Oder vereinfacht mit unserem Pixel-Maßstab:                    │
+     │    Z = Reale Breite / (hipWidthPx × meterPerPixel_ref)          │
+     │        × refCameraZ (Renormierung auf Kalibrierungs-Z)          │
+     │                                                                  │
+     │  Diese Schätzung ist eine Näherung und funktioniert gut wenn    │
+     │  die Hüfte parallel zur Kamera-Ebene ist.                       │
+     └─────────────────────────────────────────────────────────────────┘
+    */
+    const HIP_WIDTH_REAL_M = 0.35; // Realbreite der Hüfte in Metern
+    // Schätze Z-Tiefe aus Verhältnis der Pixelbreite zur erwarteten
+    const expectedPxAtRef = HIP_WIDTH_REAL_M / meterPerPixel;
+    const depthEst = refCameraZ * (expectedPxAtRef / Math.max(hipWidthPx, 1));
+    return depthEst;
+  }
+
+  return null;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  HAUPT-INFERENZ-SCHLEIFE (detectionLoop)
+//  Läuft via requestAnimationFrame (~30–60 FPS)
+// ═══════════════════════════════════════════════════════════════════════
+async function detectionLoop() {
+  if (!detector || video.readyState < 2) {
+    animFrameId = requestAnimationFrame(detectionLoop);
+    return;
+  }
+
+  syncCanvasSize();
+
+  // Pose-Erkennung
+  let poses;
+  try {
+    poses = await detector.estimatePoses(video, { flipHorizontal: false });
+  } catch(e) {
+    animFrameId = requestAnimationFrame(detectionLoop);
+    return;
+  }
+
+  // FPS
+  fpsFrames++;
+  const now = performance.now();
+  if (now - fpsLastTime >= 1000) {
+    fpsValue    = Math.round(fpsFrames * 1000 / (now - fpsLastTime));
+    fpsFrames   = 0;
+    fpsLastTime = now;
+    fpsDisplay.textContent = fpsValue;
+  }
+
+  const keypoints = poses[0]?.keypoints;
+  drawSkeleton(keypoints); // Skelett + AR-Overlay zeichnen
+
+  if (!keypoints || keypoints.length === 0) {
+    animFrameId = requestAnimationFrame(detectionLoop);
+    return;
+  }
+
+  // ── MODUS: MANUELLE KALIBRIERUNG ──
+  if (appMode === 'calibrating') {
+    const nose       = keypoints[0];
+    const leftAnkle  = keypoints[15];
+    const rightAnkle = keypoints[16];
+
+    if (nose.score > MIN_CONFIDENCE &&
+        leftAnkle.score > MIN_CONFIDENCE &&
+        rightAnkle.score > MIN_CONFIDENCE) {
+
+      const ankleY       = (leftAnkle.y + rightAnkle.y) / 2;
+      const rawPxHeight  = Math.abs(nose.y - ankleY);
+      const pixelHeight  = rawPxHeight * 1.10; // +10% für Kopfspitze
+      calibSamples.push(pixelHeight);
+
+      const progress = Math.round((calibSamples.length / CALIB_FRAMES) * 100);
+      setStatus('calib', `Kalibriere… ${progress}%`);
+
+      if (calibSamples.length >= CALIB_FRAMES) {
+        const avgPxH  = calibSamples.reduce((a,b) => a+b, 0) / calibSamples.length;
+        const bodyH   = parseFloat(heightInput.value);
+        meterPerPixel = bodyH / avgPxH;
+        calibMode     = 'manual';
+        calibModeDisplay.textContent = 'Manuell';
+
+        calibPixelEl.textContent  = avgPxH.toFixed(1);
+        calibFactorEl.textContent = meterPerPixel.toFixed(6);
+        calibInfo.classList.add('visible');
+
+        appMode = 'idle';
+        calibBtn.disabled = false;
+        calibBtn.textContent = '📐 Neu kalibrieren';
+        startBtn.disabled = false;
+        setStatus('active', 'Kalibriert – bereit zur Messung');
+        showToast('✅ Manuelle Kalibrierung abgeschlossen!');
+
+        console.log(`📐 Manuell kalibriert: ${bodyH}m / ${avgPxH.toFixed(1)}px = ${meterPerPixel.toFixed(6)} m/px`);
+      }
+    } else {
+      setStatus('calib', 'Kalibrierung: Spieler vollständig ins Bild stellen…');
+    }
+  }
+
+  // ── MODUS: GESCHWINDIGKEITSMESSUNG ──
+  if (appMode === 'measuring') {
+    const leftHip  = keypoints[11];
+    const rightHip = keypoints[12];
+
+    if (leftHip.score > MIN_CONFIDENCE && rightHip.score > MIN_CONFIDENCE) {
+
+      // Mittlere Hüft-X-Position (in Video-Originalkoordinaten)
+      const hipXpx    = (leftHip.x + rightHip.x) / 2;
+      const hipYpx    = (leftHip.y + rightHip.y) / 2;
+      const avgConf   = ((leftHip.score + rightHip.score) / 2 * 100).toFixed(0);
+      confDisplay.textContent = `${avgConf}%`;
+
+      // Tiefenschätzung (Z) für perspektivische Korrektur
+      const depthEst  = estimatePlayerDepth(keypoints);
+      if (depthEst !== null) lastHipZ = depthEst;
+
+      // Perspektivischen Korrekturfaktor berechnen (nur im AR-Modus sinnvoll)
+      if (calibMode === 'ar') {
+        perspFactor = computePerspFactor();
+        perspDepthEl.textContent  = lastHipZ ? lastHipZ.toFixed(2) + ' m' : '– m';
+        perspFactorEl.textContent = perspFactor.toFixed(3) + '×';
+      } else {
+        perspFactor = 1.0; // Kein Perspektivkorrektur im manuellen Modus
+      }
+
+      const currentTime = performance.now();
+
+      if (lastHipX !== null && lastTimestamp !== null) {
+        /*
+        ╔═══════════════════════════════════════════════════════════════╗
+        ║  KERN-BERECHNUNG: Pixel → km/h (mit Perspektivkorrektur)      ║
+        ║                                                               ║
+        ║  Schritt 1: ΔX in Video-Pixeln (horizontale Bewegung)         ║
+        ║    deltaXpx = |hipX_neu - hipX_alt|                           ║
+        ║                                                               ║
+        ║  Schritt 2: Pixel → Meter (Basis-Kalibrierung)               ║
+        ║    deltaXm_basis = deltaXpx × meterPerPixel                   ║
+        ║                                                               ║
+        ║  Schritt 3: Perspektivkorrektur (nur AR-Modus)               ║
+        ║    Wenn Spieler sich in Z bewegt, ändert sich der scheinbare  ║
+        ║    Maßstab. perspFactor = Z_aktuell / Z_ref kompensiert das.  ║
+        ║    deltaXm = deltaXm_basis × perspFactor                      ║
+        ║                                                               ║
+        ║  Schritt 4: Zeit-Delta (ms → s)                              ║
+        ║    deltaT_s = (t_neu - t_alt) / 1000                          ║
+        ║                                                               ║
+        ║  Schritt 5: m/s Momentangeschwindigkeit                       ║
+        ║    v_ms = deltaXm / deltaT_s                                  ║
+        ║                                                               ║
+        ║  Schritt 6: m/s → km/h                                       ║
+        ║    v_kmh = v_ms × 3.6                                         ║
+        ║                                                               ║
+        ║  Schritt 7: Exponentieller gleitender Durchschnitt (EMA)      ║
+        ║    ema = α × v_kmh + (1-α) × ema_alt   [α = 0.35]            ║
+        ║    Reduziert Rauschen ohne große Verzögerung einzuführen.     ║
+        ╚═══════════════════════════════════════════════════════════════╝
+        */
+
+        // Schritt 1: ΔX in Pixeln
+        const deltaXpx   = Math.abs(hipXpx - lastHipX);
+
+        // Schritt 2: Pixel → Meter (ohne Perspektivkorrektur)
+        const deltaXm_base = deltaXpx * meterPerPixel;
+
+        // Schritt 3: Perspektivkorrektur
+        // Im AR-Modus: effektiver Maßstab = Basismaßstab × Z-Verhältnis
+        // Im Manuell-Modus: perspFactor = 1.0 (keine Korrektur)
+        const deltaXm    = deltaXm_base * perspFactor;
+
+        // Schritt 4: Zeit-Delta in Sekunden
+        const deltaT_s   = (currentTime - lastTimestamp) / 1000;
+
+        if (deltaT_s > 0) {
+          // Schritt 5: m/s
+          const v_ms   = deltaXm / deltaT_s;
+
+          // Schritt 6: km/h
+          const v_kmh  = v_ms * 3.6;
+
+          // Plausibilitätsfilter
+          if (v_kmh >= 0.5 && v_kmh <= 55) {
+            framesMeasured++;
+            frameCountEl.textContent = framesMeasured;
+
+            // Schritt 7: EMA-Glättung
+            emaSpeed = EMA_ALPHA * v_kmh + (1 - EMA_ALPHA) * emaSpeed;
+
+            currentSpeedEl.textContent = emaSpeed.toFixed(1);
+
+            if (emaSpeed > topSpeedKmh) {
+              topSpeedKmh = emaSpeed;
+              topSpeedEl.textContent = topSpeedKmh.toFixed(1);
+            }
+
+            const barPct = Math.min((emaSpeed / 40) * 100, 100);
+            speedBarFill.style.width = barPct + '%';
+
+          } else {
+            currentSpeedEl.textContent = '0.0';
+            speedBarFill.style.width   = '0%';
+          }
+        }
+      }
+
+      lastHipX      = hipXpx;
+      lastTimestamp = currentTime;
+
+    } else {
+      // Hüfte nicht erkannt → Reset (verhindert Sprung-Artefakte)
+      lastHipX      = null;
+      lastTimestamp = null;
+      lastHipZ      = null;
+      confDisplay.textContent    = '–';
+      currentSpeedEl.textContent = '0.0';
+      speedBarFill.style.width   = '0%';
+    }
+  }
+
+  animFrameId = requestAnimationFrame(detectionLoop);
+}
+
+
+// ─────────────────────────────────────────────────────────────────────
+//  LINEARE ALGEBRA – 4×4 MATRIX-INVERTIERUNG
+//
+//  Benötigt um aus der Camera-to-World-Matrix die World-to-Camera-
+//  Matrix (echte View-Matrix) zu berechnen.
+//
+//  Für eine reine Rotations+Translation-Matrix (Rigid-Body-Transform)
+//  gilt: M^-1 = M^T (für den Rotationsteil) + angepasste Translation.
+//  Wir verwenden hier die allgemeine Gauss-Jordan-Methode.
+//
+//  @param {Float32Array|Array} m - 4×4 Matrix in column-major Reihenfolge
+//  @returns {Float32Array} Invertierte 4×4 Matrix (column-major)
+// ─────────────────────────────────────────────────────────────────────
+function mat4Invert(m) {
+  // Konvertiere in row-major für einfachere Indizierung
+  // m ist column-major: m[col*4 + row]
+  const a = [
+    m[0],  m[4],  m[8],  m[12],
+    m[1],  m[5],  m[9],  m[13],
+    m[2],  m[6],  m[10], m[14],
+    m[3],  m[7],  m[11], m[15],
+  ];
+
+  // Augmentierte Matrix [A | I] für Gauss-Jordan
+  const aug = [];
+  for (let i = 0; i < 4; i++) {
+    aug[i] = [a[i*4], a[i*4+1], a[i*4+2], a[i*4+3],
+              i===0?1:0, i===1?1:0, i===2?1:0, i===3?1:0];
+  }
+
+  // Vorwärtselimination mit Pivotierung
+  for (let col = 0; col < 4; col++) {
+    let pivot = col;
+    for (let row = col+1; row < 4; row++) {
+      if (Math.abs(aug[row][col]) > Math.abs(aug[pivot][col])) pivot = row;
+    }
+    [aug[col], aug[pivot]] = [aug[pivot], aug[col]];
+    const div = aug[col][col];
+    if (Math.abs(div) < 1e-10) return new Float32Array(16).fill(0);
+    for (let j = 0; j < 8; j++) aug[col][j] /= div;
+    for (let row = 0; row < 4; row++) {
+      if (row === col) continue;
+      const factor = aug[row][col];
+      for (let j = 0; j < 8; j++) aug[row][j] -= factor * aug[col][j];
+    }
+  }
+
+  // Ergebnis aus rechter Hälfte extrahieren (wieder column-major)
+  const inv = new Float32Array(16);
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 4; c++) {
+      inv[c*4 + r] = aug[r][4 + c];
+    }
+  }
+  return inv;
+}
+
+/**
+ * Transformiert einen 3D-Weltpunkt mit der View-Matrix in Kameraraum-
+ * Koordinaten und gibt die Z-Tiefe zurück.
+ * Positiver Z-Wert = vor der Kamera.
+ *
+ * @param {Object} worldPt - { x, y, z } in Weltkoordinaten [m]
+ * @returns {number} Z-Tiefe in Metern
+ */
+function worldToViewZ(worldPt) {
+  if (!cameraViewMatrix) return 0;
+  // Punkt mit View-Matrix multiplizieren: viewZ = Row2 · [x,y,z,1]
+  // Kameraraum Z-Achse zeigt rückwärts (OpenGL-Konvention), daher negieren
+  const z = cameraViewMatrix[2]  * worldPt.x +
+             cameraViewMatrix[6]  * worldPt.y +
+             cameraViewMatrix[10] * worldPt.z +
+             cameraViewMatrix[14];
+  return -z; // Negieren → positiv = vor der Kamera
+}
+
+
+// ─────────────────────────────────────────────────────────────────────
+// APP INITIALISIERUNG
+// ─────────────────────────────────────────────────────────────────────
+async function init() {
+  // 1. Kamera starten
+  const camOk = await initCamera();
+  if (!camOk) {
+    loadingOverlay.classList.add('hidden');
+    setStatus('', 'Kein Kamerazugriff');
+    return;
+  }
+
+  // 2. MoveNet Thunder laden
+  const modelOk = await loadModel();
+  if (!modelOk) {
+    loadingOverlay.classList.add('hidden');
+    setStatus('', 'Modell-Fehler');
+    return;
+  }
+
+  // 3. WebXR Support prüfen und Tab entsprechend konfigurieren
+  loadingText.textContent = 'Prüfe WebXR-Unterstützung…';
+  const xrSupported = await checkWebXRSupport();
+
+  if (xrSupported) {
+    arStartBtn.disabled = false;
+    tabAR.title = 'WebXR AR verfügbar!';
+    console.log('✅ WebXR immersive-ar verfügbar');
+  } else {
+    tabAR.title = 'WebXR nicht verfügbar (iOS/Fallback)';
+    // AR-Tab deaktivieren
+    arStartBtn.disabled = true;
+    arUnsupportedNote.classList.add('visible');
+    console.warn('⚠️ WebXR immersive-ar nicht verfügbar – Fallback aktiv');
+  }
+
+  // 4. UI freischalten
+  loadingOverlay.classList.add('hidden');
+  calibBtn.disabled = false;
+  setStatus('active', 'Bereit zur Kalibrierung');
+  showToast(`✅ MoveNet Thunder geladen! ${xrSupported ? '🔮 AR verfügbar.' : '📐 Manueller Modus aktiv.'}`, 4000);
+
+  // 5. Inferenz-Loop starten
+  detectionLoop();
+}
+
+
+// ─────────────────────────────────────────────────────────────────────
+// MODUS-TABS
+// ─────────────────────────────────────────────────────────────────────
+tabManual.addEventListener('click', () => {
+  calibMode = 'manual';
+  tabManual.classList.add('active');
+  tabAR.classList.remove('active');
+  manualPanel.style.display = 'block';
+  arPanel.classList.remove('visible');
+});
+
+tabAR.addEventListener('click', () => {
+  tabAR.classList.add('active');
+  tabManual.classList.remove('active');
+  arPanel.classList.add('visible');
+  manualPanel.style.display = 'none';
+});
+
+
+// ─────────────────────────────────────────────────────────────────────
+// EVENT HANDLER
+// ─────────────────────────────────────────────────────────────────────
+
+// Manuelle Kalibrierung
+calibBtn.addEventListener('click', () => {
+  const h = parseFloat(heightInput.value);
+  if (!h || h < 1.0 || h > 2.5) {
+    showToast('⚠️ Bitte gültige Körpergröße (1.0–2.5 m) eingeben'); return;
+  }
+  calibSamples  = [];
+  meterPerPixel = null;
+  calibInfo.classList.remove('visible');
+  startBtn.disabled = true;
+  calibBtn.disabled = true;
+  appMode = 'calibrating';
+  setStatus('calib', 'Kalibriere… aufrecht ins Bild stellen');
+  showToast('📐 Kalibrierung gestartet!', 4000);
+});
+
+// AR-Session starten
+arStartBtn.addEventListener('click', startARSession);
+
+// AR-Punkte zurücksetzen
+arResetBtn.addEventListener('click', () => {
+  arPointA = arPointB = null;
+  arPointA_px = arPointB_px = null;
+  arCalibrated = false;
+  meterPerPixel = null;
+  currentHitResult = null;
+  arPointAEl.classList.remove('set');
+  arPointBEl.classList.remove('set');
+  arPointAValEl.textContent = 'nicht gesetzt';
+  arPointBValEl.textContent = 'nicht gesetzt';
+  arCalibResult.classList.remove('visible');
+  perspBadge.classList.remove('visible');
+  arDistanceBadge.style.display = 'block';
+  arDistanceLabel.textContent = '📍 Markiere Startpunkt';
+  startBtn.disabled = true;
+  setStatus('ar', 'AR aktiv – Punkt A tippen');
+  showToast('🗑️ AR-Punkte zurückgesetzt');
+});
+
+// Start Messung
+startBtn.addEventListener('click', () => {
+  if (!meterPerPixel) { showToast('⚠️ Bitte zuerst kalibrieren!'); return; }
+  lastHipX = lastTimestamp = null;
+  lastHipZ = null;
+  framesMeasured = 0;
+  emaSpeed = 0;
+  appMode = 'measuring';
+  startBtn.disabled = true;
+  stopBtn.disabled  = false;
+  calibBtn.disabled = true;
+  setStatus('measuring', 'Messung läuft…');
+  showToast('🏃 Messung gestartet – sprint los!', 3000);
+});
+
+// Stop
+stopBtn.addEventListener('click', () => {
+  appMode = 'idle';
+  startBtn.disabled = false;
+  stopBtn.disabled  = true;
+  calibBtn.disabled = false;
+  currentSpeedEl.textContent = '0.0';
+  speedBarFill.style.width   = '0%';
+  lastHipX = lastTimestamp = lastHipZ = null;
+  setStatus('active', `Gestoppt – Top: ${topSpeedKmh.toFixed(1)} km/h`);
+  showToast(`⏹ Top Speed: ${topSpeedKmh.toFixed(1)} km/h`, 4000);
+});
+
+// Reset
+resetBtn.addEventListener('click', () => {
+  appMode = 'idle';
+  meterPerPixel = null;
+  calibSamples  = [];
+  lastHipX = lastTimestamp = lastHipZ = null;
+  topSpeedKmh = 0;
+  framesMeasured = 0;
+  emaSpeed = 0;
+  arCalibrated = false;
+  perspFactor  = 1.0;
+  arPointA = arPointB = null;
+  arPointA_px = arPointB_px = null;
+  refCameraZ = null;
+
+  calibInfo.classList.remove('visible');
+  arCalibResult.classList.remove('visible');
+  perspBadge.classList.remove('visible');
+  arPointAEl.classList.remove('set');
+  arPointBEl.classList.remove('set');
+  arPointAValEl.textContent = 'nicht gesetzt';
+  arPointBValEl.textContent = 'nicht gesetzt';
+
+  calibBtn.disabled = false;
+  calibBtn.textContent = '📐 Kalibrieren starten';
+  startBtn.disabled = true;
+  stopBtn.disabled  = true;
+  calibModeDisplay.textContent = '–';
+
+  resetSpeedDisplay();
+  setStatus('active', 'Zurückgesetzt');
+  showToast('🔄 Alles zurückgesetzt');
+});
+
+window.addEventListener('resize', syncCanvasSize);
+
+// ─────────────────────────────────────────────────────────────────────
+// STARTEN
+// ─────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
