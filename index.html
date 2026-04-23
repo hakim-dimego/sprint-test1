@@ -420,13 +420,13 @@ input[type="range"]::-webkit-slider-thumb {
 
 // ── CONFIG & STATE ───────────────────────────────────────────────
 const CFG = {
-  CONF_THRESHOLD:   0.30,
+  CONF_THRESHOLD:   0.15, // Empfindlicher für Bewegung
   MAX_SPEED_KMH:    45,
-  MIN_SPEED_KMH:    0.8,
+  MIN_SPEED_KMH:    0.2, // Erkennt auch langsamere Starts
   COUNTDOWN_SEC:    3,
-  CAL_SAMPLE_COUNT: 15,
+  CAL_SAMPLE_COUNT: 12,
   RATIO_NOSE_ANKLE: 0.88,
-  SMOOTH_BUFFER:    6,
+  SMOOTH_BUFFER:    4,  // Schnellere Reaktion auf Speed-Änderung
   MAX_HISTORY:      25
 };
 
@@ -484,13 +484,14 @@ async function initApp() {
 }
 
 function useDefaultCal() {
-  STATE.pxPerMeter = 110; // Average for 3-4m distance
+  // Angepasst für iPhone Rückkamera Sichtfeld
+  STATE.pxPerMeter = 180; 
   STATE.calibrated = true;
-  document.getElementById('cal-status-text').textContent = 'Standard-Kalibrierung (geschätzt)';
+  document.getElementById('cal-status-text').textContent = 'Standard (3m Entfernung)';
   document.getElementById('cal-status').style.color = '#00F5FF';
   document.getElementById('btn-start').disabled = false;
   document.getElementById('btn-cal-main').classList.remove('animate-pulse', 'border-cyan-400/20');
-  showToast('Standard genutzt');
+  showToast('Standard-Setup aktiv');
 }
 
 function resizeCanvas() {
@@ -553,10 +554,9 @@ function processMetrics(pose, t) {
   
   document.getElementById('m-conf').textContent = Math.round(conf*100) + '%';
   
-  // Calibration sampling
   if (STATE.calInProgress) {
     const nose = kps[KP_NOSE], lA = kps[KP_L_ANKLE], rA = kps[KP_R_ANKLE];
-    if (nose.score > 0.4 && lA.score > 0.3 && rA.score > 0.3) {
+    if (nose.score > 0.2 && lA.score > 0.15 && rA.score > 0.15) {
       const pxH = Math.abs(((lA.y + rA.y)/2) - nose.y);
       const realH = (parseFloat(document.getElementById('height-slider').value) * CFG.RATIO_NOSE_ANKLE) / 100;
       STATE.calSamples.push(pxH / realH);
@@ -564,28 +564,34 @@ function processMetrics(pose, t) {
     return;
   }
 
-  if (!STATE.measuring || !STATE.calibrated || conf < CFG.CONF_THRESHOLD) {
+  if (!STATE.measuring || !STATE.calibrated) {
     STATE.lastX = null;
     return;
   }
 
-  const sX = canv.width / video.videoWidth;
-  const hipX = ((lH.x + rH.x)/2) * sX;
+  // WICHTIG: Berechnung auf Video-Koordinaten (Raw), nicht auf skalierten Canvas-Koordinaten!
+  const hipX = (lH.x + rH.x) / 2;
+  const hipY = (lH.y + rH.y) / 2;
 
-  if (STATE.lastX !== null && STATE.lastT !== null) {
+  if (conf > CFG.CONF_THRESHOLD && STATE.lastX !== null && STATE.lastT !== null) {
     const dt = (t - STATE.lastT) / 1000;
-    if (dt > 0 && dt < 0.2) {
-      const dm = Math.abs(hipX - STATE.lastX) / STATE.pxPerMeter;
+    if (dt > 0 && dt < 0.25) {
+      // Pythagoras für X und Y Bewegung (falls man leicht schräg läuft)
+      const dx = hipX - STATE.lastX;
+      const dy = hipY - (STATE.lastY || hipY);
+      const distPx = Math.sqrt(dx*dx + dy*dy);
+      
+      const dm = distPx / STATE.pxPerMeter;
       let kmh = (dm / dt) * 3.6;
+      
       if (kmh > CFG.MAX_SPEED_KMH) kmh = CFG.MAX_SPEED_KMH;
       
-      // Basic EMA smoothing
-      STATE.currentSpeed = STATE.currentSpeed * 0.4 + kmh * 0.6;
+      // Glättung
+      STATE.currentSpeed = STATE.currentSpeed * 0.3 + kmh * 0.7;
       if (STATE.currentSpeed < CFG.MIN_SPEED_KMH) STATE.currentSpeed = 0;
       
       if (STATE.currentSpeed > STATE.topSpeed) {
         STATE.topSpeed = STATE.currentSpeed;
-        if (STATE.topSpeed > 30) beep(800, 0.1); // Milestone beep
       }
       
       STATE.speedHistory.push(STATE.currentSpeed);
@@ -596,8 +602,12 @@ function processMetrics(pose, t) {
       updateUI();
     }
   }
-  STATE.lastX = hipX;
-  STATE.lastT = t;
+  
+  if (conf > CFG.CONF_THRESHOLD) {
+    STATE.lastX = hipX;
+    STATE.lastY = hipY;
+    STATE.lastT = t;
+  }
 }
 
 // ── CALIBRATION ───────────────────────────────────────────────────
