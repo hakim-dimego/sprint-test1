@@ -476,48 +476,55 @@ async function handleFileUpload(event) {
   const file = event.target.files[0];
   if (!file) return;
   
-  // Zeige Loader während Verarbeitung
-  document.getElementById('loading-overlay').style.display = 'flex';
-  document.getElementById('loading-overlay').classList.remove('opacity-0');
-  setLoaderText('Video wird analysiert...');
+  // Show Loader immediately
+  const loader = document.getElementById('loading-overlay');
+  if (loader) {
+    loader.style.display = 'flex';
+    loader.style.opacity = '1';
+    loader.classList.remove('opacity-0');
+    setLoaderText('Video wird vorbereitet...');
+  }
   
   closeUploadModal();
+  setMode('upload'); // Switch mode immediately to hide menu
   
-  const url = URL.createObjectURL(file);
   const video = document.getElementById('video');
   const canvas = document.getElementById('canvas');
   
-  // Reset existing states
+  // 1. Clean up old state
   video.pause();
   video.classList.remove('ready');
-  canvas.classList.remove('ready');
-  
+  if (canvas) canvas.classList.remove('ready');
   if (STATE.stream) {
     STATE.stream.getTracks().forEach(t => t.stop());
     STATE.stream = null;
   }
-  
+
+  // 2. Setup video source
+  const url = URL.createObjectURL(file);
+  video.srcObject = null;
   video.muted = true;
   video.setAttribute('playsinline', 'true');
   video.src = url;
-  video.load();
-  
-  // Wait for load
-  video.onloadeddata = async () => {
-    setMode('upload');
+
+  // 3. Define the completion handler
+  const onVideoReady = async () => {
+    if (video.onloadedmetadata === null && video.onloadeddata === null) return;
+    video.onloadedmetadata = null;
+    video.onloadeddata = null;
     
-    // Force a tiny play/pause to wake up the decoder on iOS/PC
+    // Force play/pause for iOS
     try {
       await video.play();
       video.pause();
     } catch(e) {}
 
     video.classList.add('ready');
-    canvas.classList.add('ready');
+    if (canvas) canvas.classList.add('ready');
     
     if (video.videoWidth > video.videoHeight) {
       video.classList.add('video-contain');
-      canvas.classList.add('video-contain');
+      if (canvas) canvas.classList.add('video-contain');
     }
     
     const sInp = document.getElementById('trim-start');
@@ -532,25 +539,29 @@ async function handleFileUpload(event) {
     STATE.ready = true;
     STATE.trimStart = 0;
     STATE.trimEnd = video.duration;
-    video.currentTime = 0.05;
+    video.currentTime = 0.1;
     
     updateTrim();
     useDefaultCal();
     resizeCanvas();
     
-    // Hide Loader
-    document.getElementById('loading-overlay').classList.add('opacity-0');
-    setTimeout(() => {
-      document.getElementById('loading-overlay').style.display = 'none';
-      showToast('Analyse bereit');
-    }, 500);
+    if (loader) {
+      loader.classList.add('opacity-0');
+      setTimeout(() => { loader.style.display = 'none'; }, 500);
+    }
+    showToast('Video bereit');
   };
 
+  video.onloadedmetadata = onVideoReady;
+  video.onloadeddata = onVideoReady;
+  
   video.onerror = () => {
-    document.getElementById('loading-overlay').classList.add('opacity-0');
-    showToast('Video-Fehler: Nicht unterstütztes Format');
+    if (loader) loader.style.display = 'none';
+    showToast('Fehler beim Laden');
     backToMenu();
   };
+
+  video.load();
 }
 
 async function startCamera() {
