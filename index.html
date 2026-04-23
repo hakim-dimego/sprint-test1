@@ -263,45 +263,53 @@ input[type="range"]::-webkit-slider-thumb {
     </div>
   </div>
 
-  <!-- OVERLAY CONTROLS (Fixed Position for 15 Pro Max) -->
+  <!-- OVERLAY CONTROLS (Solo-Optimized for 15 Pro Max) -->
   <div class="fixed bottom-0 inset-x-0 z-[200] pointer-events-none">
     
-    <!-- Dynamic Gradient Background for visibility -->
-    <div class="pointer-events-auto flex flex-col gap-4 p-6 controls-container bg-gradient-to-t from-black via-black/80 to-transparent">
+    <div class="pointer-events-auto flex flex-col gap-4 p-6 controls-container bg-gradient-to-t from-black via-black/90 to-transparent">
       
-      <!-- Mini Stats (Higher Contrast) -->
-      <div class="flex justify-around gap-3 mb-2">
+      <!-- Mini Stats -->
+      <div class="flex justify-around gap-3 mb-1">
         <div class="bg-blue-600/20 border border-blue-400/30 rounded-2xl px-2 py-3 text-center backdrop-blur-xl flex-1">
           <div id="m-topspeed" class="text-xl font-black text-cyan-400 leading-none">—</div>
-          <div class="text-[8px] font-black text-white/60 uppercase mt-1 tracking-tighter">Top KM/H</div>
+          <div class="text-[8px] font-black text-white/50 uppercase mt-1">KM/H</div>
         </div>
         <div class="bg-blue-600/20 border border-blue-400/30 rounded-2xl px-2 py-3 text-center backdrop-blur-xl flex-1">
           <div id="m-pace" class="text-xl font-black text-lime-400 leading-none">—</div>
-          <div class="text-[8px] font-black text-white/60 uppercase mt-1 tracking-tighter">EA Pace</div>
+          <div class="text-[8px] font-black text-white/50 uppercase mt-1">PACE</div>
         </div>
         <div class="bg-blue-600/20 border border-blue-400/30 rounded-2xl px-2 py-3 text-center backdrop-blur-xl flex-1">
           <div id="m-conf" class="text-xl font-black text-white/80 leading-none">—</div>
-          <div class="text-[8px] font-black text-white/60 uppercase mt-1 tracking-tighter">Konfidenz</div>
+          <div class="text-[8px] font-black text-white/50 uppercase mt-1">KI</div>
         </div>
       </div>
 
+      <div id="cal-status" class="flex items-center justify-center gap-2 text-[10px] font-bold text-white/30 uppercase tracking-widest bg-black/40 py-2 rounded-full">
+        <div class="w-1.5 h-1.5 rounded-full bg-white/20"></div>
+        <span id="cal-status-text">1. Setup wählen</span>
+      </div>
+
       <div class="flex gap-3">
-        <button id="btn-cal-main" onclick="openCalModal()" class="flex-[2.5] flex items-center justify-center gap-3 py-5 bg-white/10 border border-white/30 rounded-[28px] text-[15px] font-black text-white active:scale-95 transition-all shadow-2xl backdrop-blur-2xl">
-          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
-          KALIBRIEREN
+        <button id="btn-cal-main" onclick="openCalModal()" class="flex-[2] flex items-center justify-center gap-2 py-4.5 bg-white/10 border border-white/20 rounded-[28px] text-[14px] font-black text-white active:scale-95 transition-all">
+          📏 KALIBRIEREN
         </button>
-        <button onclick="useDefaultCal()" class="flex-1 flex flex-col items-center justify-center bg-blue-500/10 border border-blue-400/20 rounded-[28px] active:scale-95 transition-transform backdrop-blur-md text-[9px] font-black text-blue-400 uppercase">
-          <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" class="mb-0.5"><path d="M13 5l7 7-7 7M5 5l7 7-7 7"></path></svg>
-          Skip
+        <button id="btn-skip" onclick="useDefaultCal()" class="flex-1 flex flex-col items-center justify-center bg-blue-500/10 border border-blue-400/30 rounded-[28px] active:scale-95 transition-all text-blue-400">
+          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M13 5l7 7-7 7M5 5l7 7-7 7"></path></svg>
+          <span class="text-[8px] font-black uppercase">Skip</span>
         </button>
       </div>
       
-      <button id="btn-start" disabled onclick="startMeasurement()" class="w-full py-6 bg-gradient-to-r from-blue-400 to-blue-700 rounded-[28px] text-white font-black text-xl uppercase tracking-widest shadow-[0_15px_45px_rgba(0,100,255,0.5)] active:scale-[0.98] transition-all disabled:opacity-10">
-        SPRINT STARTEN
-      </button>
+      <div class="flex flex-col gap-2">
+        <button id="btn-start" disabled onclick="startMeasurement(false)" class="w-full py-5.5 bg-blue-600 rounded-[28px] text-white font-black text-lg uppercase tracking-wider shadow-xl active:scale-[0.98] transition-all disabled:opacity-10">
+          NORMAL START (3S)
+        </button>
+        <button id="btn-solo" disabled onclick="startMeasurement(true)" class="w-full py-4 bg-white/5 border border-white/20 rounded-[28px] text-blue-400 font-black text-xs uppercase tracking-widest active:scale-[0.98] transition-all disabled:opacity-10">
+          👤 SOLO START (10S VORLAUF)
+        </button>
+      </div>
 
       <button id="btn-stop" onclick="stopMeasurement()" class="hidden w-full py-6 bg-red-600 rounded-[28px] text-white font-black text-xl uppercase tracking-widest shadow-xl active:scale-[0.98] transition-all">
-        STOPP
+        STOPP (JETZT LAUFEN!)
       </button>
     </div>
   </div>
@@ -490,14 +498,85 @@ async function initApp() {
 }
 
 function useDefaultCal() {
-  // Angepasst für iPhone Rückkamera Sichtfeld
-  STATE.pxPerMeter = 180; 
+  STATE.pxPerMeter = 160; 
   STATE.calibrated = true;
-  document.getElementById('cal-status-text').textContent = 'Standard (3m Entfernung)';
-  document.getElementById('cal-status').style.color = '#00F5FF';
-  document.getElementById('btn-start').disabled = false;
-  document.getElementById('btn-cal-main').classList.remove('animate-pulse', 'border-cyan-400/20');
-  showToast('Standard-Setup aktiv');
+  
+  // Update UI
+  const statusText = document.getElementById('cal-status-text');
+  if (statusText) {
+    statusText.textContent = 'Bereit: Standard-Setup aktiv';
+    statusText.parentElement.style.backgroundColor = 'rgba(0, 245, 255, 0.1)';
+  }
+  
+  const startBtn = document.getElementById('btn-start');
+  const soloBtn = document.getElementById('btn-solo');
+  
+  if (startBtn) {
+    startBtn.disabled = false;
+    startBtn.classList.add('animate-pulse');
+  }
+  if (soloBtn) {
+    soloBtn.disabled = false;
+  }
+  
+  showToast('Setup übersprungen - bereit!');
+}
+
+function startMeasurement(isSolo = false) {
+  const overlay = document.getElementById('countdown-overlay');
+  const num = document.getElementById('count-num');
+  const label = overlay.querySelector('.text-white\\/50');
+  
+  overlay.classList.remove('hidden');
+  overlay.classList.add('flex');
+  
+  let count = isSolo ? 10 : CFG.COUNTDOWN_SEC;
+  label.textContent = isSolo ? "In Position bringen..." : "Bereitmachen";
+  num.textContent = count;
+  speak(count);
+  
+  const iv = setInterval(() => {
+    count--;
+    if (count > 0) {
+      num.textContent = count;
+      if (count <= 3) speak(count);
+      else if (isSolo && count % 2 === 0) speak(count); // Every 2s for solo
+    } else {
+      clearInterval(iv);
+      if (isSolo && label.textContent !== "Bereitmachen") {
+        // After 10s solo, do the final 3s
+        label.textContent = "Bereitmachen";
+        count = 3;
+        num.textContent = count;
+        speak(count);
+        // Start final countdown
+        const finalIv = setInterval(() => {
+          count--;
+          if (count > 0) {
+            num.textContent = count;
+            speak(count);
+          } else {
+            clearInterval(finalIv);
+            go();
+          }
+        }, 1000);
+      } else {
+        go();
+      }
+    }
+  }, 1000);
+
+  function go() {
+    num.textContent = 'GO!';
+    num.style.color = '#C8FF00';
+    speak('Go!');
+    setTimeout(() => {
+      overlay.classList.add('hidden');
+      overlay.classList.remove('flex');
+      num.style.color = '';
+      beginSprinting();
+    }, 600);
+  }
 }
 
 function resizeCanvas() {
@@ -748,16 +827,55 @@ function beginSprinting() {
   STATE.frameCount = 0;
   STATE.confSum = 0;
   STATE.lastX = null;
+  STATE.lastY = null;
   
-  document.getElementById('btn-start').style.display = 'none';
-  document.getElementById('btn-stop').style.display = 'block';
+  // Hide setup buttons
+  const startBtn = document.getElementById('btn-start');
+  const soloBtn = document.getElementById('btn-solo');
+  const stopBtn = document.getElementById('btn-stop');
+  const calBtn = document.getElementById('btn-cal-main');
+  const skipBtn = document.getElementById('btn-skip');
+  
+  if (startBtn) startBtn.style.display = 'none';
+  if (soloBtn) soloBtn.style.display = 'none';
+  if (calBtn) calBtn.style.display = 'none';
+  if (skipBtn) skipBtn.style.display = 'none';
+  if (stopBtn) stopBtn.style.display = 'block';
+  
   document.getElementById('speed-hud').classList.add('visible');
   setStatus('measuring', 'Recording');
 }
 
 function stopMeasurement() {
   STATE.measuring = false;
+  
+  // Show setup buttons again
+  const startBtn = document.getElementById('btn-start');
+  const soloBtn = document.getElementById('btn-solo');
+  const stopBtn = document.getElementById('btn-stop');
+  const calBtn = document.getElementById('btn-cal-main');
+  const skipBtn = document.getElementById('btn-skip');
+  
+  if (startBtn) startBtn.style.display = 'block';
+  if (soloBtn) soloBtn.style.display = 'block';
+  if (calBtn) calBtn.style.display = 'flex';
+  if (skipBtn) skipBtn.style.display = 'flex';
+  if (stopBtn) stopBtn.style.display = 'none';
+  
+  document.getElementById('speed-hud').classList.remove('visible');
+  setStatus('active', 'Bereit');
+  
+  if (STATE.topSpeed > 0.5) {
+    showResult();
+  } else {
+    showToast('Kein Sprint erkannt');
+  }
+}
+
+function stopMeasurement() {
+  STATE.measuring = false;
   document.getElementById('btn-start').style.display = 'block';
+  document.getElementById('btn-solo').style.display = 'block';
   document.getElementById('btn-stop').style.display = 'none';
   document.getElementById('speed-hud').classList.remove('visible');
   setStatus('active', 'Bereit');
