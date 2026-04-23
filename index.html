@@ -86,6 +86,13 @@ body::before {
   flex-direction: column;
 }
 
+/* Ensure the app fits exactly */
+#app {
+  height: 100vh;
+  height: -webkit-fill-available;
+  position: relative;
+}
+
 #video {
   position: absolute;
   top: 0; left: 0; width: 100%; height: 100%;
@@ -231,21 +238,7 @@ input[type="range"]::-webkit-slider-thumb {
       <div class="text-cyan-400 font-bold uppercase tracking-[4px] -mt-2">km/h</div>
     </div>
 
-    <!-- Mini Stats -->
-    <div class="absolute bottom-4 inset-x-0 flex justify-around px-4 pointer-events-none z-20">
-      <div class="bg-black/60 border border-white/10 rounded-xl px-4 py-2 text-center backdrop-blur-md min-w-[70px]">
-        <div id="m-topspeed" class="text-lg font-black text-cyan-400 leading-none">—</div>
-        <div class="text-[8px] font-bold text-white/30 uppercase mt-1">Peak</div>
-      </div>
-      <div class="bg-black/60 border border-white/10 rounded-xl px-4 py-2 text-center backdrop-blur-md min-w-[70px]">
-        <div id="m-pace" class="text-lg font-black text-lime-400 leading-none">—</div>
-        <div class="text-[8px] font-bold text-white/30 uppercase mt-1">Pace</div>
-      </div>
-      <div class="bg-black/60 border border-white/10 rounded-xl px-4 py-2 text-center backdrop-blur-md min-w-[70px]">
-        <div id="m-conf" class="text-lg font-black text-white/60 leading-none">—</div>
-        <div class="text-[8px] font-bold text-white/30 uppercase mt-1">Conf</div>
-      </div>
-    </div>
+<!-- Removed old stats -->
 
     <!-- Countdown -->
     <div id="countdown-overlay" class="absolute inset-0 hidden flex-col items-center justify-center bg-black/40 backdrop-blur-sm z-30">
@@ -254,37 +247,47 @@ input[type="range"]::-webkit-slider-thumb {
     </div>
   </div>
 
-  <!-- BOTTOM PANEL -->
-  <div class="shrink-0 bg-[#0D0D1A] border-t border-white/10 p-4 pb-[calc(16px+var(--safe-bottom))] flex flex-col gap-4">
-    <!-- Graph -->
-    <div id="wave-container" class="relative h-12 bg-[#12121F] border border-white/5 rounded-xl overflow-hidden">
-      <canvas id="wave-canvas" class="w-full h-full"></canvas>
-      <span class="absolute top-1.5 left-3 text-[8px] font-black text-white/20 uppercase tracking-widest">Velocity Pattern</span>
-      <span id="wave-peak-label" class="absolute top-1.5 right-3 text-[10px] font-bold text-lime-400 font-mono"></span>
+  <!-- OVERLAY CONTROLS (Moved inside for iOS Safari robustness) -->
+  <div class="absolute bottom-0 inset-x-0 p-4 pb-[calc(16px+var(--safe-bottom))] flex flex-col gap-3 z-30 pointer-events-none">
+    
+    <!-- Mini Stats (Higher up) -->
+    <div class="flex justify-around px-2 mb-2">
+      <div class="bg-black/70 border border-white/10 rounded-xl px-4 py-2 text-center backdrop-blur-md min-w-[80px]">
+        <div id="m-topspeed" class="text-lg font-black text-cyan-400 leading-none">—</div>
+        <div class="text-[8px] font-bold text-white/30 uppercase mt-1">Top KM/H</div>
+      </div>
+      <div class="bg-black/70 border border-white/10 rounded-xl px-4 py-2 text-center backdrop-blur-md min-w-[80px]">
+        <div id="m-pace" class="text-lg font-black text-lime-400 leading-none">—</div>
+        <div class="text-[8px] font-bold text-white/30 uppercase mt-1">EA Pace</div>
+      </div>
+      <div class="bg-black/70 border border-white/10 rounded-xl px-4 py-2 text-center backdrop-blur-md min-w-[80px]">
+        <div id="m-conf" class="text-lg font-black text-white/60 leading-none">—</div>
+        <div class="text-[8px] font-bold text-white/30 uppercase mt-1">Konfidenz</div>
+      </div>
     </div>
 
-    <div id="cal-status" class="flex items-center justify-center gap-2 text-[11px] font-semibold text-white/30">
-      <div class="w-1.5 h-1.5 rounded-full bg-white/20"></div>
-      <span id="cal-status-text">Nicht kalibriert</span>
-    </div>
+    <div class="pointer-events-auto flex flex-col gap-2">
+      <div id="cal-status" class="flex items-center justify-center gap-2 text-[10px] font-bold text-white/30 uppercase tracking-widest bg-black/40 py-1 rounded-full backdrop-blur-sm">
+        <div class="w-1.5 h-1.5 rounded-full bg-white/20"></div>
+        <span id="cal-status-text">Nicht kalibriert</span>
+      </div>
 
-    <div class="flex flex-col gap-2">
       <div class="flex gap-2">
-        <button id="btn-cal-main" onclick="openCalModal()" class="flex-1 flex items-center justify-center gap-2 py-3 bg-white/5 border border-cyan-400/20 rounded-2xl text-[13px] font-bold active:scale-95 transition-all animate-pulse shadow-[0_0_10px_rgba(0,245,255,0.1)]">
-          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
-          1. Kalibrieren
+        <button id="btn-cal-main" onclick="openCalModal()" class="flex-1 flex items-center justify-center gap-2 py-4 bg-white/10 border border-cyan-400/30 rounded-2xl text-[13px] font-black text-white active:scale-95 transition-all shadow-lg backdrop-blur-md">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+          KALIBRIEREN
         </button>
-        <button onclick="useDefaultCal()" class="flex-1 py-3 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-bold text-white/40 uppercase tracking-tight active:scale-95 transition-transform">
-          Skip (Standard)
+        <button onclick="useDefaultCal()" class="w-16 flex items-center justify-center bg-white/5 border border-white/10 rounded-2xl active:scale-95 transition-transform backdrop-blur-sm">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 5l7 7-7 7M5 5l7 7-7 7"></path></svg>
         </button>
       </div>
       
-      <button id="btn-start" disabled onclick="startMeasurement()" class="w-full py-4.5 bg-gradient-to-r from-cyan-400 to-blue-500 rounded-2xl text-black font-black text-lg uppercase tracking-wider shadow-lg active:scale-[0.98] transition-all disabled:opacity-20 disabled:grayscale">
-        2. Sprint Messen
+      <button id="btn-start" disabled onclick="startMeasurement()" class="w-full py-5 bg-gradient-to-r from-cyan-400 to-blue-500 rounded-2xl text-black font-black text-lg uppercase tracking-wider shadow-[0_10px_30px_rgba(0,150,255,0.4)] active:scale-[0.98] transition-all disabled:opacity-30">
+        SPRINT STARTEN
       </button>
 
-      <button id="btn-stop" onclick="stopMeasurement()" class="hidden w-full py-4.5 bg-gradient-to-r from-red-500 to-orange-600 rounded-2xl text-white font-black text-lg uppercase tracking-wider shadow-lg active:scale-[0.98] transition-all">
-        STOPP (MESSUNG LÄUFT)
+      <button id="btn-stop" onclick="stopMeasurement()" class="hidden w-full py-5 bg-red-600 rounded-2xl text-white font-black text-lg uppercase tracking-wider shadow-lg active:scale-[0.98] transition-all">
+        STOPP
       </button>
     </div>
   </div>
@@ -447,18 +450,15 @@ async function initApp() {
   window.addEventListener('resize', resizeCanvas);
   
   try {
+    // FORCE LIGHTNING ON ALL DEVICES FOR SPEED
     await tf.setBackend('webgl');
     await tf.ready();
     
-    // Auto-detect performance capability
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    const modelType = isMobile ? poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING : poseDetection.movenet.modelType.SINGLEPOSE_THUNDER;
-    
-    setLoaderText(`MoveNet ${isMobile ? 'Lightning' : 'Thunder'} lädt...`);
+    setLoaderText(`SprintTrack AI lädt...`);
     
     STATE.detector = await poseDetection.createDetector(
       poseDetection.SupportedModels.MoveNet,
-      { modelType: modelType }
+      { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
     );
     
     setLoaderText('Bereit');
