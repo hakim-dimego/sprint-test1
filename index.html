@@ -454,7 +454,8 @@ const STATE = {
   fps:           0,
   lastFpsT:      null,
   runningFrame:  false,
-  facingMode:    'environment' // Start with back camera
+  loopStarted:   false, // Fix: Variable hinzugefügt
+  facingMode:    'environment'
 };
 
 // Keypoints indices
@@ -551,11 +552,24 @@ async function startCamera() {
 }
 
 async function switchCamera() {
+  // Beende aktuellen Stream komplett
+  if (STATE.stream) {
+    STATE.stream.getTracks().forEach(track => track.stop());
+  }
+  
   STATE.facingMode = (STATE.facingMode === 'environment') ? 'user' : 'environment';
   STATE.ready = false;
-  document.getElementById('video').classList.remove('ready');
-  showToast(STATE.facingMode === 'user' ? 'Selfie-Kamera' : 'Hauptkamera');
-  await startCamera();
+  
+  const video = document.getElementById('video');
+  video.classList.remove('ready');
+  video.srcObject = null;
+  
+  showToast(STATE.facingMode === 'user' ? 'Selfie-Modus' : 'Action-Modus');
+  
+  // Kurze Pause für Hardware-Release
+  setTimeout(async () => {
+    await startCamera();
+  }, 300);
 }
 
 // ── LOOP ──────────────────────────────────────────────────────────
@@ -589,7 +603,9 @@ function processMetrics(pose, t) {
   const lH = kps[KP_L_HIP], rH = kps[KP_R_HIP];
   const conf = ((lH.score||0) + (rH.score||0)) / 2;
   
-  document.getElementById('m-conf').textContent = Math.round(conf*100) + '%';
+  // Konfidenz-Anzeige skalieren: 0.8 MoveNet-Score = 100% in der UI
+  const displayConf = Math.min(100, Math.round(conf * 125));
+  document.getElementById('m-conf').textContent = displayConf + '%';
   
   if (STATE.calInProgress) {
     const nose = kps[KP_NOSE], lA = kps[KP_L_ANKLE], rA = kps[KP_R_ANKLE];
