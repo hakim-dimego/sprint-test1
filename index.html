@@ -5,682 +5,596 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SprintTrack Pro | AI Speed Analyzer</title>
+<title>SprintTrack Pro | AI Solo Analyzer</title>
 
 <!-- Tailwind CSS -->
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-<!-- TF.js unified bundle -->
+<!-- TF.js -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js"></script>
 <!-- Pose detection -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
 
 <style>
-/* ── CUSTOM DESIGN TOKENS ───────────────────────────────────────── */
 :root {
-  --c-bg:        #05050A;
-  --c-surface:   #0D0D1A;
-  --c-surface2:  #12121F;
-  --c-border:    rgba(0,245,255,0.12);
-  --c-cyan:      #00F5FF;
-  --c-lime:      #C8FF00;
-  --c-red:       #FF3B30;
-  --c-text:      #E8EAF0;
-  --safe-top:    env(safe-area-inset-top, 0px);
+  --c-bg: #05050A;
+  --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 20px);
 }
-
-/* ── BASE & RESET ───────────────────────────────────────────────── */
-html {
-  height: 100%;
-  height: -webkit-fill-available;
-  background: var(--c-bg);
-  overscroll-behavior: none;
-  -webkit-overflow-scrolling: touch;
-}
-
-body {
-  height: 100%;
-  height: -webkit-fill-available;
-  min-height: 100vh;
-  background: var(--c-bg);
-  color: var(--c-text);
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
-  overflow: hidden;
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-/* Scanlines HUD effect */
-body::before {
-  content: '';
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  z-index: 9999;
-  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
-  pointer-events: none;
-}
-
-#app {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
+html, body { 
   height: 100dvh; 
-  max-width: 500px;
-  margin: 0 auto;
-  position: relative;
-  overflow: hidden;
-  background: #000;
+  background: #000; 
+  color: #E8EAF0; 
+  font-family: system-ui, -apple-system, sans-serif; 
+  overflow: hidden; 
+  margin: 0; 
+  padding: 0;
 }
-
-/* Ensure controls container is always at the bottom of the visible viewport */
-.controls-container {
-  padding-bottom: calc(env(safe-area-inset-bottom) + 32px) !important;
-}
-
-#camera-zone {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 5;
-  background: #000;
-}
-
-/* ── IPHONE 15 PRO MAX SAFETY ZONES ─────────────────────────── */
-#header {
-  padding-top: calc(max(20px, var(--safe-top)) + 10px);
-  z-index: 100;
-}
-
-.controls-container {
-  padding-bottom: calc(var(--safe-bottom) + 24px);
-  background: linear-gradient(to top, 
-    rgba(0,0,0,0.95) 0%, 
-    rgba(0,0,0,0.7) 40%, 
-    rgba(0,0,0,0) 100%
-  );
-}
-
-#video {
-  position: absolute;
-  top: 0; left: 0; width: 100%; height: 100%;
-  object-fit: cover;
-  /* Spiegelverkehrung entfernt für Rückkamera */
-  transform: none;
-  opacity: 0;
-  transition: opacity 0.5s ease;
-}
-#video.ready { opacity: 1; }
-
-#canvas {
-  position: absolute;
-  top: 0; left: 0; width: 100%; height: 100%;
-  /* Spiegelverkehrung entfernt */
-  transform: none;
-  pointer-events: none;
-}
-
-.hud-corner {
-  position: absolute;
-  width: 22px; height: 22px;
-  pointer-events: none;
-  z-index: 10;
-}
-.hud-corner::before, .hud-corner::after {
-  content: ''; position: absolute; background: var(--c-cyan); box-shadow: 0 0 8px var(--c-cyan);
-}
-.hud-corner::before { width: 2px; height: 100%; top: 0; left: 0; }
-.hud-corner::after  { width: 100%; height: 2px; top: 0; left: 0; }
-.hud-tl { top: 10px; left: 10px; }
-.hud-tr { top: 10px; right: 10px; transform: scaleX(-1); }
-.hud-bl { bottom: 10px; left: 10px; transform: scaleY(-1); }
-.hud-br { bottom: 10px; right: 10px; transform: scale(-1); }
-
-/* ── SPEED HUD ──────────────────────────────────────────────────── */
-#speed-hud {
-  position: absolute;
-  top: 45%; left: 50%;
-  transform: translate(-50%, -50%);
-  text-align: center;
-  pointer-events: none;
-  z-index: 20;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-#speed-hud.visible { opacity: 1; }
-
-.speed-value {
-  font-size: 84px; font-weight: 900; letter-spacing: -4px;
-  color: #fff;
-  text-shadow: 0 0 30px rgba(0,245,255,0.8);
-}
-.speed-value.fast { color: var(--c-lime); text-shadow: 0 0 30px rgba(200,255,0,0.8); }
-
-/* ── EA PACE CARD ───────────────────────────────────────────────── */
-.player-card {
+/* Responsive Container */
+#app { 
+  height: 100dvh; 
   width: 100%;
-  max-width: 340px;
-  background: linear-gradient(145deg, #0D1520, #080D14);
-  border: 1px solid rgba(0,245,255,0.22);
-  border-radius: 24px;
-  overflow: hidden;
-  position: relative;
-  box-shadow: 0 0 60px rgba(0,245,255,0.15);
+  max-width: 500px; 
+  margin: 0 auto; 
+  position: relative; 
+  display: flex; 
+  flex-direction: column; 
+  background: var(--c-bg);
+  box-shadow: 0 0 100px rgba(0,0,0,0.5);
 }
 
-.card-grid {
-  position: absolute; inset: 0;
-  background: linear-gradient(90deg, transparent 49.5%, rgba(0,245,255,0.03) 50%, transparent 50.5%),
-              linear-gradient(0deg,  transparent 49.5%, rgba(0,245,255,0.03) 50%, transparent 50.5%);
-  background-size: 30px 30px;
+/* PC-spezifische Anpassungen */
+@media (min-width: 768px) {
+  body {
+    background: radial-gradient(circle at center, #0D1520 0%, #05050A 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #app {
+    height: 850px;
+    max-height: 95dvh;
+    border-radius: 40px;
+    border: 8px solid #1A1A2E;
+    overflow: hidden;
+  }
+}
+#camera-zone { 
+  position: absolute; 
+  inset: 0; 
+  z-index: 5; 
+  background: #000; 
+}
+#video, #canvas { 
+  position: absolute; 
+  inset: 0; 
+  width: 100%; 
+  height: 100%; 
+  object-fit: cover; 
+  transition: object-fit 0.3s ease; 
+}
+.video-contain { object-fit: contain !important; background: #000; }
+
+/* Dynamic Island & Notch Safety */
+header {
+  padding-top: calc(max(20px, var(--safe-top)) + 12px);
 }
 
-/* ── ANIMATIONS ─────────────────────────────────────────────────── */
-@keyframes countPulse {
-  0%   { transform: scale(1.5); opacity: 0; }
-  40%  { transform: scale(0.95); opacity: 1; }
-  100% { transform: scale(1); opacity: 1; }
+/* Home Bar Safety */
+.controls-container { 
+  padding-bottom: calc(var(--safe-bottom) + 32px); 
+  background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.7) 50%, rgba(0,0,0,0) 100%);
+}
+
+@keyframes countPulse { 
+  0% { transform: scale(1.8); opacity: 0; } 
+  50% { transform: scale(0.9); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; } 
 }
 .anim-count { animation: countPulse 0.8s ease-out; }
 
-/* ── CUSTOM SLIDER ──────────────────────────────────────────────── */
+/* Custom Sliders */
 input[type="range"] {
-  -webkit-appearance: none; width: 100%; height: 6px;
-  background: rgba(0,245,255,0.15); border-radius: 3px; outline: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 6px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+  outline: none;
 }
 input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 22px; height: 22px;
-  background: var(--c-cyan); border-radius: 50%; border: 2px solid #fff; cursor: pointer;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  background: #00F5FF;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(0,245,255,0.5);
 }
 </style>
 </head>
-<body class="bg-[#05050A]">
+<body>
 
 <div id="app">
   <!-- HEADER -->
-  <header id="header" class="shrink-0 flex items-center justify-between px-4 pt-[calc(14px+var(--safe-top))] pb-3 bg-[#05050A]/95 border-b border-white/10 backdrop-blur-xl z-[100]">
+  <header class="relative z-[100] flex items-center justify-between px-6 pb-4 bg-black/40 backdrop-blur-xl border-b border-white/5">
     <div class="flex items-center gap-3">
-      <div class="w-10 h-10 bg-gradient-to-br from-[#00F5FF] to-[#0060FF] rounded-xl flex items-center justify-center text-xl shadow-[0_0_20px_rgba(0,144,255,0.5)]">⚡</div>
-      <div class="flex flex-col leading-tight">
-        <span class="text-[18px] font-black bg-gradient-to-r from-[#00F5FF] to-[#0090FF] bg-clip-text text-transparent tracking-tight">SprintTrack Pro</span>
-        <span class="text-[10px] font-bold text-blue-400/60 tracking-[2px] uppercase">Elite Solo Analyzer</span>
+      <div class="w-10 h-10 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-xl flex items-center justify-center text-xl shadow-[0_0_20px_rgba(0,144,255,0.4)]">⚡</div>
+      <div class="flex flex-col">
+        <span class="text-lg font-black tracking-tighter text-white leading-none">SprintTrack Pro</span>
+        <span class="text-[9px] font-bold text-blue-400/60 uppercase tracking-widest mt-1">AI Solo Analyzer</span>
       </div>
     </div>
-    <div class="flex items-center gap-2">
-      <button onclick="switchCamera()" class="p-2 bg-blue-500/20 rounded-full border border-blue-400/30 active:scale-90 transition-transform text-blue-400">
-        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M4 4h5M4 4v5m0-5l6 6m10 10h-5m5 0v-5m0 5l-6-6M9 20H4m0 0v-5m0 5l6-6M20 4h-5m5 0v5m0-5l-6 6"></path></svg>
+    <div class="flex gap-2">
+      <button onclick="backToMenu()" id="header-back" class="hidden p-2.5 bg-white/5 border border-white/10 rounded-full text-white/40 active:scale-90 transition-transform">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"></path></svg>
       </button>
-      <button onclick="toggleHistory()" class="p-2 bg-white/5 rounded-full border border-white/10 active:scale-90 transition-transform">
-        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-      </button>
-      <div id="status-pill" class="flex items-center gap-2 px-3 py-1 bg-white/5 border border-white/10 rounded-full text-[10px] font-bold uppercase tracking-wider text-white/40">
-        <div id="status-dot" class="w-1.5 h-1.5 rounded-full bg-white/30"></div>
+      <div class="px-3 py-1.5 bg-white/5 border border-white/10 rounded-full text-[10px] font-black uppercase text-white/40 tracking-tighter flex items-center gap-2">
+        <div id="status-dot" class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></div>
         <span id="status-text">Bereit</span>
       </div>
     </div>
   </header>
 
-  <!-- CAMERA ZONE -->
+  <!-- CAMERA AREA -->
   <div id="camera-zone">
-    <div class="hud-corner hud-tl"></div>
-    <div class="hud-corner hud-tr"></div>
-    <div class="hud-corner hud-bl"></div>
-    <div class="hud-corner hud-br"></div>
-
     <video id="video" autoplay playsinline muted webkit-playsinline></video>
     <canvas id="canvas"></canvas>
-
-    <!-- Overlays -->
-    <div id="loading-overlay" class="absolute inset-0 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md z-40 transition-opacity duration-500">
-      <div class="w-12 h-12 border-3 border-cyan-500/20 border-t-cyan-400 rounded-full animate-spin shadow-[0_0_15px_rgba(0,245,255,0.3)]"></div>
-      <div id="loader-text" class="mt-4 text-[11px] font-bold text-cyan-400 uppercase tracking-widest">KI-Modell lädt...</div>
-    </div>
-
-    <div id="no-camera" class="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-[#0D0D1A] z-50">
-      <div class="w-20 h-20 bg-cyan-500/10 border border-cyan-500/30 rounded-full flex items-center justify-center text-4xl mb-4">📷</div>
-      <h2 class="text-xl font-black mb-2">Kamera aktivieren</h2>
-      <p class="text-sm text-white/40 mb-6">Wir benötigen Kamerazugriff für das Echtzeit-Pose-Tracking.</p>
-      <button onclick="startCamera()" class="px-8 py-4 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-2xl text-black font-black uppercase tracking-wider shadow-lg active:scale-95 transition-transform">Kamera starten</button>
-    </div>
-
-    <!-- Live HUD elements -->
-    <div id="fps-badge" class="absolute top-4 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-black/60 border border-white/10 rounded-md text-[9px] font-mono text-white/40 z-20">-- FPS</div>
     
-    <div id="speed-hud">
-      <div id="live-speed" class="speed-value">0.0</div>
-      <div class="text-cyan-400 font-bold uppercase tracking-[4px] -mt-2">km/h</div>
+    <!-- Speed HUD -->
+    <div id="speed-hud" class="absolute top-[35%] left-1/2 -translate-x-1/2 text-center opacity-0 transition-opacity duration-300 pointer-events-none z-20">
+      <div id="live-speed" class="text-8xl font-black text-white drop-shadow-[0_0_30px_rgba(0,245,255,0.4)] italic leading-none">0.0</div>
+      <div class="text-cyan-400 font-black tracking-[5px] uppercase text-sm mt-2">km/h</div>
     </div>
 
-<!-- Removed old stats -->
-
-    <!-- Countdown -->
-    <div id="countdown-overlay" class="absolute inset-0 hidden flex-col items-center justify-center bg-black/40 backdrop-blur-sm z-30">
-      <div id="count-num" class="text-[120px] font-black text-cyan-400 drop-shadow-[0_0_30px_rgba(0,245,255,0.8)] leading-none">3</div>
-      <div class="text-sm font-bold text-white/50 tracking-[5px] uppercase mt-4">Bereitmachen</div>
-    </div>
+    <div id="fps-badge" class="absolute top-28 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-black/40 rounded text-[9px] font-mono text-white/30 z-20">-- FPS</div>
   </div>
 
-  <!-- OVERLAY CONTROLS (Solo-Optimized for 15 Pro Max) -->
-  <div class="fixed bottom-0 inset-x-0 z-[200] pointer-events-none">
+  <!-- MAIN MENU -->
+  <div id="main-menu" class="absolute inset-0 z-[200] bg-[#05050A] p-8 flex flex-col pt-32 overflow-y-auto">
+    <div class="text-center mb-10 flex-shrink-0">
+      <h2 class="text-xs font-black text-blue-400 uppercase tracking-[5px] mb-2">Modus Wählen</h2>
+      <p class="text-white/20 text-[10px] font-bold uppercase">iPhone 15 Pro Max Edition</p>
+    </div>
     
-    <div class="pointer-events-auto flex flex-col gap-4 p-6 controls-container bg-gradient-to-t from-black via-black/90 to-transparent">
+    <div class="flex flex-col gap-5">
+      <button onclick="setMode('record')" class="flex items-center gap-6 p-6 bg-white/5 border border-white/10 rounded-[32px] active:scale-[0.97] transition-all text-left group">
+        <div class="w-16 h-16 bg-blue-500/20 rounded-2xl flex items-center justify-center text-3xl">📸</div>
+        <div>
+          <div class="text-xl font-black text-white">Record Mode</div>
+          <div class="text-xs text-white/30 font-medium mt-1">Jemanden aufnehmen</div>
+        </div>
+      </button>
       
-      <!-- Mini Stats -->
-      <div class="flex justify-around gap-3 mb-1">
-        <div class="bg-blue-600/20 border border-blue-400/30 rounded-2xl px-2 py-3 text-center backdrop-blur-xl flex-1">
-          <div id="m-topspeed" class="text-xl font-black text-cyan-400 leading-none">—</div>
-          <div class="text-[8px] font-black text-white/50 uppercase mt-1">KM/H</div>
+      <button onclick="setMode('solo')" class="flex items-center gap-6 p-6 bg-white/5 border border-white/10 rounded-[32px] active:scale-[0.97] transition-all text-left group">
+        <div class="w-16 h-16 bg-cyan-500/20 rounded-2xl flex items-center justify-center text-3xl">👤</div>
+        <div>
+          <div class="text-xl font-black text-white">Solo Training</div>
+          <div class="text-xs text-white/30 font-medium mt-1">10s Vorlauf + Audio</div>
         </div>
-        <div class="bg-blue-600/20 border border-blue-400/30 rounded-2xl px-2 py-3 text-center backdrop-blur-xl flex-1">
-          <div id="m-pace" class="text-xl font-black text-lime-400 leading-none">—</div>
-          <div class="text-[8px] font-black text-white/50 uppercase mt-1">PACE</div>
-        </div>
-        <div class="bg-blue-600/20 border border-blue-400/30 rounded-2xl px-2 py-3 text-center backdrop-blur-xl flex-1">
-          <div id="m-conf" class="text-xl font-black text-white/80 leading-none">—</div>
-          <div class="text-[8px] font-black text-white/50 uppercase mt-1">KI</div>
-        </div>
-      </div>
-
-      <div id="cal-status" class="flex items-center justify-center gap-2 text-[10px] font-bold text-white/30 uppercase tracking-widest bg-black/40 py-2 rounded-full">
-        <div class="w-1.5 h-1.5 rounded-full bg-white/20"></div>
-        <span id="cal-status-text">1. Setup wählen</span>
-      </div>
-
-      <div class="flex gap-3">
-        <button id="btn-cal-main" onclick="openCalModal()" class="flex-[2] flex items-center justify-center gap-2 py-4.5 bg-white/10 border border-white/20 rounded-[28px] text-[14px] font-black text-white active:scale-95 transition-all">
-          📏 KALIBRIEREN
-        </button>
-        <button id="btn-skip" class="flex-1 flex flex-col items-center justify-center bg-blue-500/20 border border-blue-400/40 rounded-[28px] active:scale-90 transition-all text-blue-400 shadow-[0_0_15px_rgba(0,144,255,0.2)]">
-          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M13 5l7 7-7 7M5 5l7 7-7 7"></path></svg>
-          <span class="text-[10px] font-black uppercase">Schnellstart</span>
-        </button>
-      </div>
+      </button>
       
-      <div class="flex flex-col gap-2">
-        <button id="btn-start" disabled onclick="startMeasurement(false)" class="w-full py-5.5 bg-blue-600 rounded-[28px] text-white font-black text-lg uppercase tracking-wider shadow-xl active:scale-[0.98] transition-all disabled:opacity-10">
-          NORMAL START (3S)
-        </button>
-        <button id="btn-solo" disabled onclick="startMeasurement(true)" class="w-full py-4 bg-white/5 border border-white/20 rounded-[28px] text-blue-400 font-black text-xs uppercase tracking-widest active:scale-[0.98] transition-all disabled:opacity-10">
-          👤 SOLO START (10S VORLAUF)
-        </button>
-      </div>
-
-      <button id="btn-stop" onclick="stopMeasurement()" class="hidden w-full py-6 bg-red-600 rounded-[28px] text-white font-black text-xl uppercase tracking-widest shadow-xl active:scale-[0.98] transition-all">
-        STOPP (JETZT LAUFEN!)
+      <button onclick="openUploadModal()" class="flex items-center gap-6 p-6 bg-white/5 border border-white/10 rounded-[32px] active:scale-[0.97] transition-all text-left group">
+        <div class="w-16 h-16 bg-purple-500/20 rounded-2xl flex items-center justify-center text-3xl">📁</div>
+        <div>
+          <div class="text-xl font-black text-white">Video Analyse</div>
+          <div class="text-xs text-white/30 font-medium mt-1">Upload & Trimming</div>
+        </div>
       </button>
     </div>
   </div>
+
+  <!-- UPLOAD MODAL -->
+  <div id="upload-modal" class="fixed inset-0 hidden z-[500] bg-black/98 backdrop-blur-3xl p-8 flex flex-col justify-center">
+    <div class="mb-10 text-center">
+      <h3 class="text-2xl font-black text-white mb-2 uppercase tracking-tighter">Video Anforderungen</h3>
+      <p class="text-sm text-white/40 leading-relaxed max-w-xs mx-auto">Für eine präzise Messung muss das Video folgende Kriterien erfüllen:</p>
+    </div>
+    <div class="space-y-4 mb-12">
+      <div class="flex gap-4 p-5 bg-white/5 rounded-3xl border border-white/5"><span class="text-2xl text-blue-400">📏</span><div class="text-sm text-white/70"><b>Perspektive:</b> Seitlich (quer), Ganzkörper von Kopf bis Fuss sichtbar.</div></div>
+      <div class="flex gap-4 p-5 bg-white/5 rounded-3xl border border-white/5"><span class="text-2xl text-blue-400">📹</span><div class="text-sm text-white/70"><b>FPS:</b> Mindestens 30 FPS (60 empfohlen), stabil gefilmt.</div></div>
+      <div class="flex gap-4 p-5 bg-white/5 rounded-3xl border border-white/5"><span class="text-2xl text-blue-400">💾</span><div class="text-sm text-white/70"><b>Format:</b> .mp4, .mov (max. 50MB).</div></div>
+    </div>
+    <label class="w-full py-7 bg-blue-600 rounded-[32px] text-white font-black text-center uppercase tracking-widest shadow-2xl active:scale-95 transition-transform cursor-pointer">
+      Datei auswählen
+      <input type="file" id="video-upload-input" class="hidden" accept="video/*" onchange="handleFileUpload(event)">
+    </label>
+    <button onclick="closeUploadModal()" class="mt-8 text-xs font-black text-white/20 uppercase tracking-widest">Abbrechen</button>
+  </div>
+
+  <!-- CONTROLS OVERLAY -->
+  <div id="controls-overlay" class="fixed bottom-0 inset-x-0 z-[200] pointer-events-none hidden">
+    <div class="pointer-events-auto flex flex-col gap-4 p-6 controls-container">
+      
+      <!-- Video Trimmer (Only visible in upload mode) -->
+      <div id="video-trimmer" class="hidden bg-black/60 border border-white/10 rounded-[32px] p-5 mb-2 backdrop-blur-2xl">
+        <div class="text-[10px] font-black text-blue-400 uppercase tracking-[3px] mb-4 flex justify-between">
+          <span>Video Zuschneiden</span>
+          <span id="trim-duration" class="text-white/60">0.0s gewählt</span>
+        </div>
+        <div class="flex flex-col gap-5">
+          <div class="flex items-center gap-4">
+            <span class="text-[9px] font-black text-white/30 w-10">START</span>
+            <input type="range" id="trim-start" min="0" max="100" value="0" step="0.1" oninput="updateTrim()" class="flex-1">
+            <span id="trim-start-val" class="text-[10px] font-mono text-cyan-400 font-bold w-10 text-right">0.0s</span>
+          </div>
+          <div class="flex items-center gap-4">
+            <span class="text-[9px] font-black text-white/30 w-10">ENDE</span>
+            <input type="range" id="trim-end" min="0" max="100" value="100" step="0.1" oninput="updateTrim()" class="flex-1">
+            <span id="trim-end-val" class="text-[10px] font-mono text-purple-400 font-bold w-10 text-right">0.0s</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats Row -->
+      <div class="flex justify-around gap-3 mb-1">
+        <div class="bg-blue-600/20 border border-blue-400/30 rounded-2xl p-4 flex-1 text-center backdrop-blur-xl shadow-xl">
+          <div id="m-topspeed" class="text-2xl font-black text-white leading-none">—</div>
+          <div class="text-[8px] font-black text-white/40 uppercase mt-1.5 tracking-tighter">KM/H Peak</div>
+        </div>
+        <div class="bg-blue-600/20 border border-blue-400/30 rounded-2xl p-4 flex-1 text-center backdrop-blur-xl shadow-xl">
+          <div id="m-pace" class="text-2xl font-black text-lime-400 leading-none">—</div>
+          <div class="text-[8px] font-black text-white/40 uppercase mt-1.5 tracking-tighter">EA Pace</div>
+        </div>
+        <div class="bg-blue-600/20 border border-blue-400/30 rounded-2xl p-4 flex-1 text-center backdrop-blur-xl shadow-xl">
+          <div id="m-conf" class="text-2xl font-black text-blue-400 leading-none">—</div>
+          <div class="text-[8px] font-black text-white/40 uppercase mt-1.5 tracking-tighter">KI Conf</div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="flex gap-3">
+        <button id="btn-skip" onclick="useDefaultCal()" class="flex-1 py-5 bg-white/10 border border-white/20 rounded-[28px] text-[13px] font-black text-white active:scale-95 shadow-xl">⏩ SCHNELLSTART</button>
+        <button onclick="openCalModal()" class="flex-1 py-5 bg-white/5 border border-white/10 rounded-[28px] text-[13px] font-black text-white/40 active:scale-95">📏 KALIBRIEREN</button>
+      </div>
+
+      <button id="btn-start-action" disabled onclick="handleActionStart()" class="w-full py-6.5 bg-gradient-to-r from-blue-500 to-blue-800 rounded-[32px] text-white font-black text-xl uppercase tracking-widest shadow-[0_20px_50px_rgba(0,120,255,0.4)] active:scale-[0.98] transition-all disabled:opacity-10">MESSUNG STARTEN</button>
+      <button id="btn-stop" onclick="stopMeasurement()" class="hidden w-full py-6.5 bg-red-600 rounded-[32px] text-white font-black text-xl uppercase tracking-widest active:scale-[0.98] transition-all shadow-2xl">MESSUNG STOPPEN</button>
+    </div>
+  </div>
+
+  <!-- OVERLAYS -->
+  <div id="loading-overlay" class="fixed inset-0 z-[1000] bg-[#05050A] flex flex-col items-center justify-center transition-opacity duration-500">
+    <div class="w-14 h-14 border-4 border-blue-500/10 border-t-blue-500 rounded-full animate-spin mb-6"></div>
+    <div id="loader-text" class="text-[12px] font-black uppercase text-blue-400 tracking-[4px] text-center px-6">SprintTrack AI Lab</div>
+  </div>
+
+  <div id="countdown-overlay" class="fixed inset-0 hidden z-[500] bg-black/40 backdrop-blur-sm flex-col items-center justify-center">
+    <div id="count-num" class="text-[160px] font-black text-white drop-shadow-[0_0_50px_rgba(0,144,255,0.7)] leading-none italic">3</div>
+    <div id="count-label" class="text-sm font-black text-blue-400 uppercase tracking-[8px] mt-8">Bereitmachen</div>
+  </div>
+
+  <div id="cal-modal" class="fixed inset-0 hidden z-[500] bg-black/90 items-end p-6 backdrop-blur-xl">
+    <div class="w-full bg-[#0D0D1A] rounded-[40px] p-10 flex flex-col gap-8 shadow-2xl border border-white/5">
+      <div class="text-center">
+        <h3 class="text-2xl font-black text-white uppercase tracking-tighter mb-1">Körpergröße</h3>
+        <p class="text-xs text-white/30 font-bold uppercase tracking-widest">Für präzisen Maßstab</p>
+      </div>
+      <div class="flex justify-between items-baseline px-2">
+        <span class="text-sm font-black text-white/40 uppercase tracking-widest">Deine Grösse</span>
+        <span class="text-4xl font-black text-cyan-400 italic"><span id="height-val">178</span><span class="text-sm text-white/30 ml-2 not-italic">cm</span></span>
+      </div>
+      <input type="range" id="height-slider" min="140" max="220" value="178" oninput="document.getElementById('height-val').textContent=this.value" class="mb-4">
+      <button onclick="confirmCalibration()" class="w-full py-6 bg-blue-600 rounded-[28px] text-white font-black uppercase tracking-widest shadow-2xl active:scale-95 transition-transform">KALIBRIERUNG STARTEN</button>
+      <button onclick="closeCalModal()" class="text-[10px] font-black text-white/20 uppercase tracking-widest">Abbrechen</button>
+    </div>
+  </div>
+
+  <!-- RESULT CARD -->
+  <div id="result-overlay" class="fixed inset-0 hidden items-center justify-center bg-black/95 backdrop-blur-3xl z-[600] p-6">
+    <div class="w-full max-w-sm bg-gradient-to-br from-[#0D1520] to-[#080D14] border border-white/15 rounded-[48px] p-10 relative flex flex-col items-center shadow-[0_0_80px_rgba(0,144,255,0.2)]">
+      <div class="w-full flex justify-between items-center mb-10">
+        <span class="px-3 py-1.5 bg-blue-500/10 border border-blue-400/30 rounded-lg text-[10px] font-black text-blue-400 tracking-widest">SPRINT CARD</span>
+        <span id="res-time" class="text-[11px] font-mono text-white/30 font-bold">--:--</span>
+      </div>
+      <div class="text-[11px] font-black text-white/30 uppercase tracking-[5px] mb-3">Top Speed</div>
+      <div id="res-speed" class="text-9xl font-black text-white italic leading-none tracking-tighter mb-3 drop-shadow-2xl">0.0</div>
+      <div class="text-base font-black text-cyan-400 tracking-[8px] uppercase mb-12">KM / H</div>
+      
+      <div class="w-full bg-black/40 rounded-[32px] p-6 mb-10 border border-white/5">
+        <div class="flex justify-between items-center mb-4">
+          <span class="text-[11px] font-black text-white/30 uppercase tracking-widest">EA FC Pace</span>
+          <span id="res-pace" class="text-5xl font-black text-lime-400 italic">0</span>
+        </div>
+        <div class="h-2.5 bg-white/5 rounded-full overflow-hidden">
+          <div id="res-pace-bar" class="h-full bg-gradient-to-r from-cyan-400 to-lime-400 w-0 transition-all duration-1000"></div>
+        </div>
+      </div>
+      
+      <div class="grid grid-cols-2 gap-4 w-full">
+        <button onclick="shareResult()" class="py-6 bg-blue-600 rounded-[28px] text-white font-black text-sm uppercase tracking-widest active:scale-95 shadow-xl">Teilen</button>
+        <button onclick="closeResult()" class="py-6 bg-white/5 border border-white/10 rounded-[28px] text-white/40 font-black text-sm uppercase tracking-widest active:scale-95">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="fixed bottom-48 left-1/2 -translate-x-1/2 px-8 py-4 bg-blue-600 text-white text-[11px] font-black uppercase tracking-widest rounded-full z-[10000] opacity-0 pointer-events-none transition-all duration-300 shadow-2xl"></div>
 </div>
-
-<!-- CALIBRATION MODAL -->
-<div id="cal-modal" class="fixed inset-0 hidden items-end justify-center bg-black/80 backdrop-blur-xl z-[500] p-4">
-  <div class="w-full max-w-md bg-[#0D0D1A] border border-white/10 rounded-3xl p-6 flex flex-col gap-6 translate-y-full transition-transform duration-300 shadow-2xl">
-    <div class="w-10 h-1.5 bg-white/10 rounded-full mx-auto -mt-2"></div>
-    <div>
-      <h3 class="text-xl font-black mb-1">Setup & Kalibrierung</h3>
-      <p class="text-xs text-white/40 leading-relaxed">Stell dich in ca. 3-4m Entfernung frontal vor die Kamera. Die KI misst deine Körperhöhe im Verhältnis zur Distanz.</p>
-    </div>
-
-    <div class="flex flex-col gap-2">
-      <div class="flex justify-between items-baseline">
-        <label class="text-[10px] font-black uppercase text-white/30 tracking-widest">Körpergröße</label>
-        <span class="text-xl font-mono text-cyan-400 font-black"><span id="height-val">178</span> <span class="text-[10px] text-white/30">cm</span></span>
-      </div>
-      <input type="range" id="height-slider" min="140" max="210" value="178" oninput="document.getElementById('height-val').textContent=this.value">
-    </div>
-
-    <div id="cal-progress-container" class="hidden">
-      <div class="flex justify-between text-[10px] font-bold text-white/40 uppercase mb-2">
-        <span id="cal-prog-text">Scanning...</span>
-        <span id="cal-prog-perc">0%</span>
-      </div>
-      <div class="h-1.5 bg-white/5 rounded-full overflow-hidden">
-        <div id="cal-prog-bar" class="h-full bg-gradient-to-r from-cyan-400 to-lime-400 w-0 transition-all duration-300"></div>
-      </div>
-    </div>
-
-    <div class="flex flex-col gap-2">
-      <button onclick="confirmCalibration()" class="w-full py-4 bg-lime-400 rounded-2xl text-black font-black uppercase tracking-wider active:scale-95 transition-transform">Start Kalibrierung</button>
-      <button onclick="closeCalModal()" class="w-full py-3 text-white/30 font-bold uppercase text-xs">Abbrechen</button>
-    </div>
-  </div>
-</div>
-
-<!-- RESULT OVERLAY -->
-<div id="result-overlay" class="fixed inset-0 hidden items-center justify-center bg-black/90 backdrop-blur-2xl z-[600] p-6 overflow-y-auto">
-  <div class="player-card flex flex-col opacity-0 scale-90 transition-all duration-500">
-    <div class="card-grid"></div>
-    
-    <div class="relative p-6 flex flex-col items-center">
-      <div class="w-full flex justify-between items-center mb-6">
-        <span class="px-2 py-0.5 bg-cyan-400/10 border border-cyan-400/40 rounded text-[9px] font-black text-cyan-400 tracking-widest">SPRINT CARD</span>
-        <span id="card-time" class="text-[10px] font-mono text-white/40 tracking-tighter">--:--</span>
-      </div>
-
-      <div class="flex flex-col items-center mb-6">
-        <span class="text-[10px] font-black text-white/30 uppercase tracking-[3px] mb-1">Max Speed</span>
-        <div id="card-speed" class="text-7xl font-black text-white leading-none tracking-tighter drop-shadow-[0_0_20px_rgba(0,245,255,0.4)]">0.0</div>
-        <span class="text-sm font-bold text-cyan-400 tracking-[3px] mt-1 uppercase">KM / H</span>
-      </div>
-
-      <div class="w-full bg-black/40 border border-white/5 rounded-2xl p-4 mb-4">
-        <div class="flex justify-between items-baseline mb-2">
-          <span class="text-[10px] font-black text-white/30 uppercase tracking-widest">EA FC Pace</span>
-          <span id="card-pace" class="text-3xl font-black text-lime-400">0</span>
-        </div>
-        <div class="h-1.5 bg-white/10 rounded-full overflow-hidden">
-          <div id="pace-bar" class="h-full bg-gradient-to-r from-cyan-400 to-lime-400 w-0 transition-all duration-1000"></div>
-        </div>
-      </div>
-
-      <div id="card-comparison" class="w-full flex items-center gap-4 bg-lime-400/5 border border-lime-400/20 rounded-2xl p-4 mb-4">
-        <div id="card-icon" class="text-3xl">🏃</div>
-        <div class="flex flex-col">
-          <span id="card-level" class="text-[10px] font-black text-white/40 uppercase tracking-widest">Profi Niveau</span>
-          <span id="card-name" class="font-black text-lime-400">Mbappé-Level</span>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-3 gap-2 w-full mb-6">
-        <div class="bg-white/5 border border-white/5 rounded-xl p-3 text-center">
-          <div id="stat-avg" class="text-lg font-black text-white leading-none">—</div>
-          <div class="text-[8px] font-bold text-white/30 uppercase mt-1">Ø kmh</div>
-        </div>
-        <div class="bg-white/5 border border-white/5 rounded-xl p-3 text-center">
-          <div id="stat-frames" class="text-lg font-black text-white leading-none">—</div>
-          <div class="text-[8px] font-bold text-white/30 uppercase mt-1">Frames</div>
-        </div>
-        <div class="bg-white/5 border border-white/5 rounded-xl p-3 text-center">
-          <div id="stat-conf" class="text-lg font-black text-white leading-none">—</div>
-          <div class="text-[8px] font-bold text-white/30 uppercase mt-1">KI Conf</div>
-        </div>
-      </div>
-
-      <div class="flex gap-2 w-full">
-        <button onclick="shareResult()" class="flex-1 py-4 bg-cyan-400 rounded-xl text-black font-black uppercase text-sm tracking-widest active:scale-95 transition-transform">Teilen</button>
-        <button onclick="closeResult()" class="flex-1 py-4 bg-white/5 border border-white/10 rounded-xl text-white font-black uppercase text-sm tracking-widest active:scale-95 transition-transform">Schließen</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- HISTORY SIDEBAR -->
-<div id="history-sidebar" class="fixed inset-y-0 right-0 w-[85%] max-w-[360px] bg-[#05050A]/98 backdrop-blur-2xl border-l border-white/10 z-[700] transform translate-x-full transition-transform duration-400 ease-out flex flex-col">
-  <div class="p-6 border-b border-white/10 flex items-center justify-between">
-    <h3 class="text-xl font-black uppercase tracking-widest">History</h3>
-    <button onclick="toggleHistory()" class="p-2 text-white/40 hover:text-white">
-      <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
-    </button>
-  </div>
-  <div id="history-list" class="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
-    <!-- History items here -->
-  </div>
-  <div class="p-6 border-t border-white/10">
-    <button onclick="clearHistory()" class="w-full py-3 bg-red-500/10 border border-red-500/20 text-red-500 rounded-xl font-bold text-xs uppercase tracking-widest">Verlauf löschen</button>
-  </div>
-</div>
-
-<!-- TOAST -->
-<div id="toast" class="fixed bottom-32 left-1/2 -translate-x-1/2 px-6 py-3 bg-cyan-400 text-black text-[11px] font-black uppercase tracking-[2px] rounded-full z-[9000] opacity-0 translate-y-4 pointer-events-none transition-all duration-300 shadow-2xl"></div>
 
 <script>
 "use strict";
 
-// ── CONFIG & STATE ───────────────────────────────────────────────
 const CFG = {
-  CONF_THRESHOLD:   0.15, // Empfindlicher für Bewegung
-  MAX_SPEED_KMH:    45,
-  MIN_SPEED_KMH:    0.2, // Erkennt auch langsamere Starts
-  COUNTDOWN_SEC:    3,
+  CONF_THRESHOLD: 0.45,
+  MAX_SPEED_KMH: 45,
+  MIN_SPEED_KMH: 0.5,
+  COUNTDOWN_SEC: 3,
   CAL_SAMPLE_COUNT: 12,
   RATIO_NOSE_ANKLE: 0.88,
-  SMOOTH_BUFFER:    4,  // Schnellere Reaktion auf Speed-Änderung
-  MAX_HISTORY:      25
+  SMOOTHING: 0.75,
+  ACCEL_LIMIT: 6.0,
+  DEFAULT_PX_PER_METER: 255
 };
 
 const STATE = {
-  detector:      null,
-  stream:        null,
-  ready:         false,
-  calibrated:    false,
-  pxPerMeter:    1.0,
-  measuring:     false,
-  currentSpeed:  0,
-  topSpeed:      0,
-  speedHistory:  [],
-  frameCount:    0,
-  confSum:       0,
-  lastX:         null,
-  lastY:         null,
-  lastT:         null,
-  calInProgress: false,
-  calSamples:    [],
-  results:       JSON.parse(localStorage.getItem('st_results') || '[]'),
-  fps:           0,
-  lastFpsT:      null,
-  runningFrame:  false,
-  loopStarted:   false, // Fix: Variable hinzugefügt
-  facingMode:    'environment'
+  detector: null, stream: null, ready: false, calibrated: false,
+  pxPerMeter: 1, measuring: false, currentSpeed: 0, topSpeed: 0,
+  speedHistory: [], frameCount: 0, confSum: 0, lastX: null, lastY: null, lastT: null,
+  calInProgress: false, calSamples: [], facingMode: 'environment', activeMode: 'menu',
+  loopStarted: false, runningFrame: false, trimStart: 0, trimEnd: 0, isContained: false
 };
 
-// Keypoints indices
 const KP_NOSE = 0, KP_L_HIP = 11, KP_R_HIP = 12, KP_L_ANKLE = 15, KP_R_ANKLE = 16;
 
-// ── INIT ──────────────────────────────────────────────────────────
 async function initApp() {
+  const loaderText = document.getElementById('loader-text');
+  const loader = document.getElementById('loading-overlay');
+  
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
   
-  // Bind buttons manually to ensure iOS compatibility
-  const skipBtn = document.getElementById('btn-skip');
-  if (skipBtn) {
-    skipBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      useDefaultCal();
-    });
-  }
+  // Ultimativer Sicherheits-Timeout: Loader nach 12 Sek. immer ausblenden
+  const safetyTimer = setTimeout(() => {
+    if (loader && loader.style.display !== 'none') {
+      console.warn("Ladevorgang dauerte zu lange, erzwinge Start...");
+      loader.style.display = 'none';
+    }
+  }, 12000);
 
   try {
+    if (loaderText) loaderText.textContent = "Grafik-Engine...";
     await tf.setBackend('webgl');
     await tf.ready();
-    setLoaderText(`SprintTrack AI lädt...`);
+    
+    if (loaderText) loaderText.textContent = "KI-Modell...";
     STATE.detector = await poseDetection.createDetector(
       poseDetection.SupportedModels.MoveNet,
       { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
     );
-    setLoaderText('Bereit');
-    document.getElementById('loading-overlay').classList.add('opacity-0');
-    setTimeout(() => document.getElementById('loading-overlay').style.display = 'none', 500);
-    startCamera();
-    renderHistory();
-  } catch(e) {
-    setLoaderText('TF.js Fehler: ' + e.message);
+    
+    if (loaderText) loaderText.textContent = "Bereit!";
+    
+    // Motor starten
+    startLoop(); 
+    
+    clearTimeout(safetyTimer);
+    setTimeout(() => {
+      if (loader) {
+        loader.style.opacity = '0';
+        setTimeout(() => loader.style.display = 'none', 500);
+      }
+    }, 300);
+    
+  } catch(e) { 
+    console.error("KI-Ladefehler:", e);
+    // Fallback auf CPU
+    try {
+      if (loaderText) loaderText.textContent = "Fallback-Modus...";
+      await tf.setBackend('cpu');
+      STATE.detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet);
+      startLoop();
+      clearTimeout(safetyTimer);
+      if (loader) loader.style.display = 'none';
+    } catch(e2) {
+      if (loaderText) loaderText.innerHTML = `Fehler: ${e.message}<br><button onclick="location.reload()" style="margin-top:15px;background:#00F5FF;color:000;padding:8px 16px;border-radius:8px;font-weight:bold;">RETRY</button>`;
+    }
   }
+}
+
+function setMode(mode) {
+  STATE.activeMode = mode;
+  document.getElementById('main-menu').classList.add('hidden');
+  document.getElementById('controls-overlay').classList.remove('hidden');
+  document.getElementById('header-back').classList.remove('hidden');
+  
+  const trimmer = document.getElementById('video-trimmer');
+  const startBtn = document.getElementById('btn-start-action');
+
+  if (mode === 'upload') {
+    trimmer.classList.remove('hidden');
+    startBtn.textContent = "ANALYSE STARTEN";
+  } else {
+    trimmer.classList.add('hidden');
+    startBtn.textContent = "MESSUNG STARTEN";
+  }
+
+  if (mode === 'solo') {
+    STATE.facingMode = 'user';
+    showToast('Selfie-Kamera aktiv');
+  } else {
+    STATE.facingMode = 'environment';
+  }
+  
+  if (mode !== 'upload') startCamera();
+}
+
+function backToMenu() {
+  STATE.activeMode = 'menu';
+  STATE.ready = false;
+  document.getElementById('main-menu').classList.remove('hidden');
+  document.getElementById('controls-overlay').classList.add('hidden');
+  document.getElementById('header-back').classList.add('hidden');
+  document.getElementById('speed-hud').classList.remove('opacity-100');
+  document.getElementById('video-trimmer').classList.add('hidden');
+  
+  if (STATE.stream) {
+    STATE.stream.getTracks().forEach(t => t.stop());
+    STATE.stream = null;
+  }
+  
+  const video = document.getElementById('video');
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+  video.srcObject = null;
+  video.classList.remove('ready', 'video-contain');
+  document.getElementById('canvas').classList.remove('video-contain');
 }
 
 function useDefaultCal() {
-  console.log("Using default calibration...");
-  STATE.pxPerMeter = 160; 
+  STATE.pxPerMeter = CFG.DEFAULT_PX_PER_METER;
   STATE.calibrated = true;
-  
-  const statusText = document.getElementById('cal-status-text');
-  const statusPill = document.getElementById('cal-status');
-  const startBtn = document.getElementById('btn-start');
-  const soloBtn = document.getElementById('btn-solo');
-
-  if (statusText) statusText.textContent = 'Bereit: Standard aktiv';
-  if (statusPill) statusPill.style.backgroundColor = 'rgba(0, 245, 255, 0.2)';
-  
-  if (startBtn) {
-    startBtn.disabled = false;
-    startBtn.removeAttribute('disabled'); // Ensure attribute is gone
-    startBtn.classList.add('animate-pulse');
-    startBtn.style.opacity = "1";
-  }
-  if (soloBtn) {
-    soloBtn.disabled = false;
-    soloBtn.removeAttribute('disabled');
-    soloBtn.style.opacity = "1";
-  }
-  
-  showToast('Setup übersprungen - GO!');
-  beep(400, 0.1); // Small feedback sound
+  const startBtn = document.getElementById('btn-start-action');
+  startBtn.disabled = false;
+  startBtn.style.opacity = "1";
+  document.getElementById('status-text').textContent = 'Bereit';
+  showToast('Standard-Setup aktiv');
+  beep(400, 0.1);
 }
 
-function startMeasurement(isSolo = false) {
-  const overlay = document.getElementById('countdown-overlay');
-  const num = document.getElementById('count-num');
-  const label = overlay.querySelector('.text-white\\/50');
+function updateTrim() {
+  const video = document.getElementById('video');
+  const startInp = document.getElementById('trim-start');
+  const endInp = document.getElementById('trim-end');
   
-  overlay.classList.remove('hidden');
-  overlay.classList.add('flex');
+  STATE.trimStart = parseFloat(startInp.value);
+  STATE.trimEnd = parseFloat(endInp.value);
   
-  let count = isSolo ? 10 : CFG.COUNTDOWN_SEC;
-  label.textContent = isSolo ? "In Position bringen..." : "Bereitmachen";
-  num.textContent = count;
-  speak(count);
+  if (STATE.trimStart >= STATE.trimEnd) {
+    STATE.trimEnd = STATE.trimStart + 0.5;
+    endInp.value = STATE.trimEnd;
+  }
   
-  const iv = setInterval(() => {
-    count--;
-    if (count > 0) {
-      num.textContent = count;
-      if (count <= 3) speak(count);
-      else if (isSolo && count % 2 === 0) speak(count); // Every 2s for solo
-    } else {
-      clearInterval(iv);
-      if (isSolo && label.textContent !== "Bereitmachen") {
-        // After 10s solo, do the final 3s
-        label.textContent = "Bereitmachen";
-        count = 3;
-        num.textContent = count;
-        speak(count);
-        // Start final countdown
-        const finalIv = setInterval(() => {
-          count--;
-          if (count > 0) {
-            num.textContent = count;
-            speak(count);
-          } else {
-            clearInterval(finalIv);
-            go();
-          }
-        }, 1000);
-      } else {
-        go();
-      }
+  document.getElementById('trim-start-val').textContent = STATE.trimStart.toFixed(1) + 's';
+  document.getElementById('trim-end-val').textContent = STATE.trimEnd.toFixed(1) + 's';
+  document.getElementById('trim-duration').textContent = (STATE.trimEnd - STATE.trimStart).toFixed(1) + 's gewählt';
+  
+  video.currentTime = STATE.trimStart;
+}
+
+async function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  // Zeige Loader während Verarbeitung
+  document.getElementById('loading-overlay').style.display = 'flex';
+  document.getElementById('loading-overlay').classList.remove('opacity-0');
+  setLoaderText('Video wird analysiert...');
+  
+  closeUploadModal();
+  
+  const url = URL.createObjectURL(file);
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  
+  // Reset existing states
+  video.pause();
+  video.classList.remove('ready');
+  canvas.classList.remove('ready');
+  
+  if (STATE.stream) {
+    STATE.stream.getTracks().forEach(t => t.stop());
+    STATE.stream = null;
+  }
+  
+  video.muted = true;
+  video.setAttribute('playsinline', 'true');
+  video.src = url;
+  video.load();
+  
+  // Wait for load
+  video.onloadeddata = async () => {
+    setMode('upload');
+    
+    // Force a tiny play/pause to wake up the decoder on iOS/PC
+    try {
+      await video.play();
+      video.pause();
+    } catch(e) {}
+
+    video.classList.add('ready');
+    canvas.classList.add('ready');
+    
+    if (video.videoWidth > video.videoHeight) {
+      video.classList.add('video-contain');
+      canvas.classList.add('video-contain');
     }
-  }, 1000);
-
-  function go() {
-    num.textContent = 'GO!';
-    num.style.color = '#C8FF00';
-    speak('Go!');
+    
+    const sInp = document.getElementById('trim-start');
+    const eInp = document.getElementById('trim-end');
+    if (sInp && eInp) {
+      sInp.max = video.duration;
+      eInp.max = video.duration;
+      eInp.value = video.duration;
+      sInp.value = 0;
+    }
+    
+    STATE.ready = true;
+    STATE.trimStart = 0;
+    STATE.trimEnd = video.duration;
+    video.currentTime = 0.05;
+    
+    updateTrim();
+    useDefaultCal();
+    resizeCanvas();
+    
+    // Hide Loader
+    document.getElementById('loading-overlay').classList.add('opacity-0');
     setTimeout(() => {
-      overlay.classList.add('hidden');
-      overlay.classList.remove('flex');
-      num.style.color = '';
-      beginSprinting();
-    }, 600);
-  }
-}
+      document.getElementById('loading-overlay').style.display = 'none';
+      showToast('Analyse bereit');
+    }, 500);
+  };
 
-function resizeCanvas() {
-  const zone = document.getElementById('camera-zone');
-  const canv = document.getElementById('canvas');
-  canv.width = zone.clientWidth;
-  canv.height = zone.clientHeight;
+  video.onerror = () => {
+    document.getElementById('loading-overlay').classList.add('opacity-0');
+    showToast('Video-Fehler: Nicht unterstütztes Format');
+    backToMenu();
+  };
 }
 
 async function startCamera() {
   try {
-    if (STATE.stream) {
-      STATE.stream.getTracks().forEach(track => track.stop());
-    }
-
-    const constraints = { 
-      video: { 
-        facingMode: { ideal: STATE.facingMode }, 
-        width: { ideal: 1280 }, 
-        height: { ideal: 720 } 
-      } 
-    };
-    
+    if (STATE.stream) STATE.stream.getTracks().forEach(t => t.stop());
+    const constraints = { video: { facingMode: { ideal: STATE.facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } } };
     STATE.stream = await navigator.mediaDevices.getUserMedia(constraints);
     const video = document.getElementById('video');
-    video.srcObject = STATE.stream;
+    const canvas = document.getElementById('canvas');
     
-    // Mirror ONLY if front camera is used
-    if (STATE.facingMode === 'user') {
-      video.style.transform = 'scaleX(-1)';
-      document.getElementById('canvas').style.transform = 'scaleX(-1)';
-    } else {
-      video.style.transform = 'none';
-      document.getElementById('canvas').style.transform = 'none';
-    }
-
+    video.srcObject = STATE.stream;
+    video.style.transform = (STATE.facingMode === 'user') ? 'scaleX(-1)' : 'none';
+    canvas.style.transform = (STATE.facingMode === 'user') ? 'scaleX(-1)' : 'none';
+    
     video.onloadedmetadata = () => {
       video.play();
       video.classList.add('ready');
-      document.getElementById('no-camera').style.display = 'none';
+      canvas.classList.add('ready');
       STATE.ready = true;
-      // startLoop is called only once in initApp via startCamera
-      if (!STATE.loopStarted) {
-        startLoop();
-        STATE.loopStarted = true;
-      }
+      resizeCanvas();
     };
-  } catch(e) {
-    console.error(e);
-    document.getElementById('no-camera').style.display = 'flex';
-  }
+  } catch(e) { showToast('Kamera Fehler'); }
 }
 
-async function switchCamera() {
-  // Beende aktuellen Stream komplett
-  if (STATE.stream) {
-    STATE.stream.getTracks().forEach(track => track.stop());
-  }
-  
-  STATE.facingMode = (STATE.facingMode === 'environment') ? 'user' : 'environment';
-  STATE.ready = false;
-  
-  const video = document.getElementById('video');
-  video.classList.remove('ready');
-  video.srcObject = null;
-  
-  showToast(STATE.facingMode === 'user' ? 'Selfie-Modus' : 'Action-Modus');
-  
-  // Kurze Pause für Hardware-Release
-  setTimeout(async () => {
-    await startCamera();
-  }, 300);
-}
-
-// ── LOOP ──────────────────────────────────────────────────────────
 function startLoop() {
   const video = document.getElementById('video');
   const canv = document.getElementById('canvas');
   const ctx = canv.getContext('2d');
-
   function frame(t) {
     requestAnimationFrame(frame);
-    calcFPS(t);
-
-    if (!STATE.ready || STATE.runningFrame) return;
+    if (!STATE.detector || STATE.runningFrame) return;
     if (video.readyState < 2) return;
+    if (video.paused && STATE.activeMode !== 'upload') return;
 
     STATE.runningFrame = true;
     STATE.detector.estimatePoses(video, { flipHorizontal: false }).then(poses => {
       ctx.clearRect(0, 0, canv.width, canv.height);
       if (poses && poses[0]) {
         drawSkeleton(ctx, poses[0], canv, video);
-        processMetrics(poses[0], t);
+        const timestamp = (STATE.activeMode === 'upload') ? video.currentTime * 1000 : t;
+        processMetrics(poses[0], timestamp);
       }
       STATE.runningFrame = false;
-    }).catch(() => STATE.runningFrame = false);
+    }).catch(() => { STATE.runningFrame = false; });
   }
   requestAnimationFrame(frame);
 }
@@ -689,421 +603,181 @@ function processMetrics(pose, t) {
   const kps = pose.keypoints;
   const lH = kps[KP_L_HIP], rH = kps[KP_R_HIP];
   const conf = ((lH.score||0) + (rH.score||0)) / 2;
-  
-  // Konfidenz-Anzeige skalieren: 0.8 MoveNet-Score = 100% in der UI
-  const displayConf = Math.min(100, Math.round(conf * 125));
-  document.getElementById('m-conf').textContent = displayConf + '%';
-  
+  document.getElementById('m-conf').textContent = Math.min(100, Math.round(conf * 125)) + '%';
+
   if (STATE.calInProgress) {
     const nose = kps[KP_NOSE], lA = kps[KP_L_ANKLE], rA = kps[KP_R_ANKLE];
-    if (nose.score > 0.2 && lA.score > 0.15 && rA.score > 0.15) {
-      const pxH = Math.abs(((lA.y + rA.y)/2) - nose.y);
-      const realH = (parseFloat(document.getElementById('height-slider').value) * CFG.RATIO_NOSE_ANKLE) / 100;
-      STATE.calSamples.push(pxH / realH);
+    if (nose.score > 0.35 && lA.score > 0.3 && rA.score > 0.3) {
+      const pxH = Math.abs(((lA.y+rA.y)/2) - nose.y);
+      const realH = (parseFloat(document.getElementById('height-slider').value)*0.88)/100;
+      STATE.calSamples.push(pxH/realH);
     }
     return;
   }
+  if (!STATE.measuring || !STATE.calibrated) { STATE.lastX = null; return; }
 
-  if (!STATE.measuring || !STATE.calibrated) {
-    STATE.lastX = null;
-    return;
-  }
-
-  // WICHTIG: Berechnung auf Video-Koordinaten (Raw), nicht auf skalierten Canvas-Koordinaten!
-  const hipX = (lH.x + rH.x) / 2;
-  const hipY = (lH.y + rH.y) / 2;
-
+  const hipX = (lH.x+rH.x)/2, hipY = (lH.y+rH.y)/2;
   if (conf > CFG.CONF_THRESHOLD && STATE.lastX !== null && STATE.lastT !== null) {
     const dt = (t - STATE.lastT) / 1000;
-    if (dt > 0 && dt < 0.25) {
-      // Pythagoras für X und Y Bewegung (falls man leicht schräg läuft)
-      const dx = hipX - STATE.lastX;
-      const dy = hipY - (STATE.lastY || hipY);
+    if (dt > 0.005 && dt < 0.15) {
+      const dx = hipX - STATE.lastX, dy = hipY - (STATE.lastY || hipY);
       const distPx = Math.sqrt(dx*dx + dy*dy);
-      
-      const dm = distPx / STATE.pxPerMeter;
-      let kmh = (dm / dt) * 3.6;
-      
+      const rawKmh = (distPx / STATE.pxPerMeter / dt) * 3.6;
+      let kmh = rawKmh;
+      if (STATE.currentSpeed > 0) kmh = Math.min(rawKmh, STATE.currentSpeed + CFG.ACCEL_LIMIT);
       if (kmh > CFG.MAX_SPEED_KMH) kmh = CFG.MAX_SPEED_KMH;
-      
-      // Glättung
-      STATE.currentSpeed = STATE.currentSpeed * 0.3 + kmh * 0.7;
+      STATE.currentSpeed = STATE.currentSpeed * CFG.SMOOTHING + kmh * (1-CFG.SMOOTHING);
       if (STATE.currentSpeed < CFG.MIN_SPEED_KMH) STATE.currentSpeed = 0;
-      
-      if (STATE.currentSpeed > STATE.topSpeed) {
-        STATE.topSpeed = STATE.currentSpeed;
-      }
-      
-      STATE.speedHistory.push(STATE.currentSpeed);
-      if (STATE.speedHistory.length > 100) STATE.speedHistory.shift();
-      STATE.frameCount++;
-      STATE.confSum += conf;
-      
+      if (STATE.currentSpeed > STATE.topSpeed) STATE.topSpeed = STATE.currentSpeed;
       updateUI();
     }
   }
-  
-  if (conf > CFG.CONF_THRESHOLD) {
-    STATE.lastX = hipX;
-    STATE.lastY = hipY;
-    STATE.lastT = t;
+  if (conf > CFG.CONF_THRESHOLD) { STATE.lastX = hipX; STATE.lastY = hipY; STATE.lastT = t; }
+}
+
+function handleActionStart() {
+  if (STATE.activeMode === 'upload') {
+    const video = document.getElementById('video');
+    video.currentTime = STATE.trimStart;
+    video.play();
+    beginMeasurement();
+    const checkEnd = setInterval(() => {
+      if (video.currentTime >= STATE.trimEnd || video.paused || video.ended) {
+        clearInterval(checkEnd);
+        video.pause();
+        stopMeasurement();
+      }
+    }, 100);
+    return;
   }
-}
 
-// ── CALIBRATION ───────────────────────────────────────────────────
-function openCalModal() {
-  document.getElementById('cal-modal').style.display = 'flex';
-  setTimeout(() => document.getElementById('cal-modal').children[0].classList.remove('translate-y-full'), 10);
-}
-
-function closeCalModal() {
-  document.getElementById('cal-modal').children[0].classList.add('translate-y-full');
-  setTimeout(() => document.getElementById('cal-modal').style.display = 'none', 300);
-}
-
-function confirmCalibration() {
-  STATE.calSamples = [];
-  STATE.calInProgress = true;
-  document.getElementById('cal-progress-container').classList.remove('hidden');
-  
-  const iv = setInterval(() => {
-    const count = STATE.calSamples.length;
-    const perc = Math.min(100, Math.round((count / CFG.CAL_SAMPLE_COUNT) * 100));
-    document.getElementById('cal-prog-bar').style.width = perc + '%';
-    document.getElementById('cal-prog-perc').textContent = perc + '%';
-    document.getElementById('cal-prog-text').textContent = count >= CFG.CAL_SAMPLE_COUNT ? 'Berechnet...' : 'Scanning Body...';
-    
-    if (count >= CFG.CAL_SAMPLE_COUNT) {
-      clearInterval(iv);
-      finishCalibration();
-    }
-  }, 100);
-}
-
-function finishCalibration() {
-  STATE.calInProgress = false;
-  const median = STATE.calSamples.sort((a,b)=>a-b)[Math.floor(STATE.calSamples.length/2)];
-  STATE.pxPerMeter = median;
-  STATE.calibrated = true;
-  
-  document.getElementById('cal-status-text').textContent = 'Kalibriert ✓ (' + Math.round(median) + ' px/m)';
-  document.getElementById('cal-status').style.color = '#C8FF00';
-  document.getElementById('btn-start').disabled = false;
-  
-  showToast('Kalibrierung OK!');
-  setTimeout(closeCalModal, 800);
-}
-
-// ── SPRINT CONTROL ───────────────────────────────────────────────
-function startMeasurement() {
+  const isSolo = STATE.activeMode === 'solo';
   const overlay = document.getElementById('countdown-overlay');
   const num = document.getElementById('count-num');
-  overlay.classList.remove('hidden');
-  overlay.classList.add('flex');
+  const label = document.getElementById('count-label');
+  overlay.classList.remove('hidden'); overlay.classList.add('flex');
   
-  let count = CFG.COUNTDOWN_SEC;
-  num.textContent = count;
-  speak(count);
-  
+  let count = isSolo ? 10 : 3;
+  label.textContent = isSolo ? "In Position gehen" : "Bereitmachen";
+  num.textContent = count; speak(count);
+
   const iv = setInterval(() => {
     count--;
     if (count > 0) {
       num.textContent = count;
-      num.classList.remove('anim-count');
-      void num.offsetWidth;
-      num.classList.add('anim-count');
-      speak(count);
+      if (count <= 3 || (isSolo && count % 2 === 0)) speak(count);
     } else {
       clearInterval(iv);
-      num.textContent = 'GO!';
-      num.style.color = '#C8FF00';
-      speak('Go!');
-      setTimeout(() => {
-        overlay.classList.add('hidden');
-        overlay.classList.remove('flex');
-        num.style.color = '';
-        beginSprinting();
-      }, 600);
+      if (isSolo && label.textContent !== "Bereitmachen") {
+        label.textContent = "Bereitmachen"; count = 3; num.textContent = count; speak(count);
+        const fIv = setInterval(() => {
+          count--;
+          if (count > 0) { num.textContent = count; speak(count); }
+          else { clearInterval(fIv); go(); }
+        }, 1000);
+      } else { go(); }
     }
   }, 1000);
-}
 
-function beginSprinting() {
-  STATE.measuring = true;
-  STATE.topSpeed = 0;
-  STATE.speedHistory = [];
-  STATE.frameCount = 0;
-  STATE.confSum = 0;
-  STATE.lastX = null;
-  STATE.lastY = null;
-  
-  // Hide setup buttons
-  const startBtn = document.getElementById('btn-start');
-  const soloBtn = document.getElementById('btn-solo');
-  const stopBtn = document.getElementById('btn-stop');
-  const calBtn = document.getElementById('btn-cal-main');
-  const skipBtn = document.getElementById('btn-skip');
-  
-  if (startBtn) startBtn.style.display = 'none';
-  if (soloBtn) soloBtn.style.display = 'none';
-  if (calBtn) calBtn.style.display = 'none';
-  if (skipBtn) skipBtn.style.display = 'none';
-  if (stopBtn) stopBtn.style.display = 'block';
-  
-  document.getElementById('speed-hud').classList.add('visible');
-  setStatus('measuring', 'Recording');
-}
-
-function stopMeasurement() {
-  STATE.measuring = false;
-  
-  // Show setup buttons again
-  const startBtn = document.getElementById('btn-start');
-  const soloBtn = document.getElementById('btn-solo');
-  const stopBtn = document.getElementById('btn-stop');
-  const calBtn = document.getElementById('btn-cal-main');
-  const skipBtn = document.getElementById('btn-skip');
-  
-  if (startBtn) startBtn.style.display = 'block';
-  if (soloBtn) soloBtn.style.display = 'block';
-  if (calBtn) calBtn.style.display = 'flex';
-  if (skipBtn) skipBtn.style.display = 'flex';
-  if (stopBtn) stopBtn.style.display = 'none';
-  
-  document.getElementById('speed-hud').classList.remove('visible');
-  setStatus('active', 'Bereit');
-  
-  if (STATE.topSpeed > 0.5) {
-    showResult();
-  } else {
-    showToast('Kein Sprint erkannt');
+  function go() {
+    num.textContent = 'GO!'; num.style.color = '#C8FF00'; speak('Go!');
+    setTimeout(() => { 
+      overlay.classList.add('hidden'); overlay.classList.remove('flex'); num.style.color = '';
+      beginMeasurement(); 
+    }, 600);
   }
 }
 
+function beginMeasurement() {
+  STATE.measuring = true; STATE.topSpeed = 0; STATE.currentSpeed = 0; STATE.lastX = null;
+  document.getElementById('btn-start-action').style.display = 'none';
+  document.getElementById('btn-skip').style.display = 'none';
+  document.getElementById('btn-stop').style.display = 'block';
+  document.getElementById('speed-hud').classList.add('opacity-100');
+  document.getElementById('status-text').textContent = 'Recording';
+}
+
 function stopMeasurement() {
   STATE.measuring = false;
-  document.getElementById('btn-start').style.display = 'block';
-  document.getElementById('btn-solo').style.display = 'block';
+  document.getElementById('btn-start-action').style.display = 'block';
+  document.getElementById('btn-skip').style.display = 'flex';
   document.getElementById('btn-stop').style.display = 'none';
-  document.getElementById('speed-hud').classList.remove('visible');
-  setStatus('active', 'Bereit');
-  
-  if (STATE.topSpeed > 0.5) {
-    showResult();
-  } else {
-    showToast('Kein Sprint erkannt');
-  }
+  document.getElementById('speed-hud').classList.remove('opacity-100');
+  document.getElementById('status-text').textContent = 'Bereit';
+  if (STATE.topSpeed > 0.5) showResult(); else showToast('Kein Sprint erkannt');
 }
 
-function resetAll() {
-  STATE.topSpeed = 0;
-  STATE.currentSpeed = 0;
-  STATE.speedHistory = [];
-  updateUI();
-  drawWaveform();
-  showToast('Reset ausgeführt');
-}
-
-// ── RESULTS & HISTORY ─────────────────────────────────────────────
 function showResult() {
   const speed = STATE.topSpeed;
   const pace = Math.min(99, Math.max(1, Math.round((speed - 15) * 4.5) || 1));
+  document.getElementById('res-speed').textContent = speed.toFixed(1);
+  document.getElementById('res-pace').textContent = pace;
   const now = new Date();
-  
-  document.getElementById('card-time').textContent = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
-  document.getElementById('card-speed').textContent = speed.toFixed(1);
-  document.getElementById('card-pace').textContent = pace;
-  
-  const comp = getComp(speed);
-  document.getElementById('card-icon').textContent = comp.icon;
-  document.getElementById('card-level').textContent = comp.level;
-  document.getElementById('card-name').textContent = comp.name;
-  document.getElementById('card-comparison').style.borderColor = comp.color + '44';
-  document.getElementById('card-name').style.color = comp.color;
-  
-  document.getElementById('stat-avg').textContent = (STATE.speedHistory.reduce((a,b)=>a+b,0)/STATE.speedHistory.length || 0).toFixed(1);
-  document.getElementById('stat-frames').textContent = STATE.frameCount;
-  document.getElementById('stat-conf').textContent = Math.round((STATE.confSum/STATE.frameCount)*100 || 0) + '%';
-
-  const overlay = document.getElementById('result-overlay');
-  overlay.style.display = 'flex';
+  document.getElementById('res-time').textContent = now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
+  document.getElementById('result-overlay').classList.remove('hidden');
+  document.getElementById('result-overlay').classList.add('flex');
   setTimeout(() => {
-    overlay.children[0].classList.remove('opacity-0', 'scale-90');
-    document.getElementById('pace-bar').style.width = pace + '%';
+    document.getElementById('result-overlay').children[0].style.opacity = '1';
+    document.getElementById('res-pace-bar').style.width = pace + '%';
   }, 50);
-
-  // Save to history
-  const res = { id: Date.now(), speed: speed.toFixed(1), pace: pace, date: now.toLocaleString() };
-  STATE.results.unshift(res);
-  if (STATE.results.length > CFG.MAX_HISTORY) STATE.results.pop();
-  localStorage.setItem('st_results', JSON.stringify(STATE.results));
-  renderHistory();
 }
 
 function closeResult() {
-  const overlay = document.getElementById('result-overlay');
-  overlay.children[0].classList.add('opacity-0', 'scale-90');
-  setTimeout(() => overlay.style.display = 'none', 500);
+  document.getElementById('result-overlay').children[0].style.opacity = '0';
+  setTimeout(() => {
+    document.getElementById('result-overlay').classList.add('hidden');
+    document.getElementById('result-overlay').classList.remove('flex');
+    document.getElementById('res-pace-bar').style.width = '0%';
+  }, 300);
 }
 
-function getComp(s) {
-  if (s > 36) return { icon:'🏆', level:'Weltklasse', name:'Mbappé Pace', color:'#C8FF00' };
-  if (s > 33) return { icon:'🥇', level:'Elite', name:'Profi Niveau', color:'#00F5FF' };
-  if (s > 30) return { icon:'⭐', level:'Top Amateur', name:'Oberliga Speed', color:'#FFFFFF' };
-  return { icon:'🏃', level:'Basis', name:'Solider Runner', color:'#888888' };
-}
-
-function renderHistory() {
-  const list = document.getElementById('history-list');
-  if (STATE.results.length === 0) {
-    list.innerHTML = `<div class="py-12 text-center text-white/20 text-xs font-bold uppercase tracking-widest">Keine Sprints vorhanden</div>`;
-    return;
-  }
-  list.innerHTML = STATE.results.map(r => `
-    <div class="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
-      <div>
-        <div class="text-[10px] text-white/30 font-bold uppercase mb-1">${r.date}</div>
-        <div class="text-xl font-black text-white">${r.speed} <span class="text-[10px] text-cyan-400 uppercase">km/h</span></div>
-      </div>
-      <div class="text-right">
-        <div class="text-[10px] text-white/30 font-bold uppercase mb-1">PACE</div>
-        <div class="text-xl font-black text-lime-400">${r.pace}</div>
-      </div>
-    </div>
-  `).join('');
-}
-
-function toggleHistory() {
-  const sidebar = document.getElementById('history-sidebar');
-  const isOpen = sidebar.classList.contains('translate-x-0');
-  sidebar.classList.toggle('translate-x-full', isOpen);
-  sidebar.classList.toggle('translate-x-0', !isOpen);
-}
-
-function clearHistory() {
-  if (confirm('Verlauf wirklich löschen?')) {
-    STATE.results = [];
-    localStorage.removeItem('st_results');
-    renderHistory();
-  }
-}
-
-// ── DRAWING ───────────────────────────────────────────────────────
-function drawSkeleton(ctx, pose, canv, vid) {
-  const kps = pose.keypoints;
-  const sX = canv.width / vid.videoWidth;
-  const sY = canv.height / vid.videoHeight;
-
-  ctx.strokeStyle = 'rgba(0, 245, 255, 0.5)';
-  ctx.lineWidth = 2;
-  const adj = [[5,6],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]];
-  adj.forEach(([i, j]) => {
-    const a = kps[i], b = kps[j];
-    if (a.score > 0.3 && b.score > 0.3) {
-      ctx.beginPath(); ctx.moveTo(a.x*sX, a.y*sY); ctx.lineTo(b.x*sX, b.y*sY); ctx.stroke();
-    }
-  });
-
-  kps.forEach((kp, i) => {
-    if (kp.score > 0.3) {
-      const isH = (i===KP_L_HIP||i===KP_R_HIP);
-      ctx.fillStyle = isH ? '#C8FF00' : '#00F5FF';
-      ctx.beginPath(); ctx.arc(kp.x*sX, kp.y*sY, isH?5:3, 0, 7); ctx.fill();
-    }
-  });
-}
-
-function drawWaveform() {
-  const el = document.getElementById('wave-canvas');
-  const ctx = el.getContext('2d');
-  const w = el.offsetWidth, h = el.offsetHeight;
-  el.width = w; el.height = h;
-  
-  ctx.clearRect(0,0,w,h);
-  if (STATE.speedHistory.length < 2) return;
-  
-  const data = STATE.speedHistory;
-  const max = Math.max(10, ...data);
-  ctx.beginPath();
-  ctx.strokeStyle = '#00F5FF';
-  ctx.lineWidth = 2;
-  data.forEach((v, i) => {
-    const x = (i / (data.length - 1)) * w;
-    const y = h - (v / max) * h * 0.8 - 5;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-}
-
-// ── HELPERS ───────────────────────────────────────────────────────
 function updateUI() {
   document.getElementById('live-speed').textContent = STATE.currentSpeed.toFixed(1);
-  document.getElementById('live-speed').className = 'speed-value' + (STATE.currentSpeed > 30 ? ' fast' : '');
   document.getElementById('m-topspeed').textContent = STATE.topSpeed.toFixed(1);
   document.getElementById('m-pace').textContent = Math.round((STATE.topSpeed - 15) * 4.5) || '—';
-  document.getElementById('wave-peak-label').textContent = 'PEAK: ' + STATE.topSpeed.toFixed(1);
-  if (STATE.frameCount % 5 === 0) drawWaveform();
 }
 
-function setStatus(type, text) {
-  const pill = document.getElementById('status-pill');
-  const dot = document.getElementById('status-dot');
-  document.getElementById('status-text').textContent = text;
-  
-  pill.classList.remove('text-cyan-400', 'text-red-500', 'border-cyan-400/30', 'border-red-500/30');
-  dot.classList.remove('bg-cyan-400', 'bg-red-500', 'animate-pulse');
-  
-  if (type === 'measuring') {
-    pill.classList.add('text-red-500', 'border-red-500/30');
-    dot.classList.add('bg-red-500', 'animate-pulse');
-  } else if (type === 'active') {
-    pill.classList.add('text-cyan-400', 'border-cyan-400/30');
-    dot.classList.add('bg-cyan-400');
+function speak(t) { if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(t); u.rate=1.4; speechSynthesis.speak(u); } }
+function beep(f, d) { const a = new (window.AudioContext||window.webkitAudioContext)(); const o = a.createOscillator(); const g = a.createGain(); o.connect(g); g.connect(a.destination); o.frequency.value = f; g.gain.value = 0.1; o.start(); setTimeout(() => { o.stop(); a.close(); }, d*1000); }
+function showToast(m) { const t = document.getElementById('toast'); t.textContent = m; t.style.opacity = '1'; setTimeout(() => t.style.opacity = '0', 2500); }
+function openCalModal() { document.getElementById('cal-modal').classList.remove('hidden'); document.getElementById('cal-modal').classList.add('flex'); }
+function closeCalModal() { document.getElementById('cal-modal').classList.add('hidden'); }
+function confirmCalibration() { STATE.calSamples=[]; STATE.calInProgress=true; setTimeout(() => { STATE.calInProgress=false; const m = STATE.calSamples.sort((a,b)=>a-b)[Math.floor(STATE.calSamples.length/2)]; if(m){ STATE.pxPerMeter=m; STATE.calibrated=true; document.getElementById('btn-start-action').disabled=false; showToast('Kalibriert!'); closeCalModal(); } }, 4000); }
+
+function resizeCanvas() {
+  const z=document.getElementById('camera-zone'), c=document.getElementById('canvas'), v=document.getElementById('video');
+  c.width=z.clientWidth; c.height=z.clientHeight;
+  STATE.isContained = v.classList.contains('video-contain');
+}
+
+function getCorrectScaling(kps, canv, vid) {
+  const videoRatio = vid.videoWidth / vid.videoHeight;
+  const canvRatio = canv.width / canv.height;
+  let scale, offsetX = 0, offsetY = 0;
+  if (STATE.isContained) {
+    if (videoRatio > canvRatio) { scale = canv.width / vid.videoWidth; offsetY = (canv.height - vid.videoHeight * scale) / 2; }
+    else { scale = canv.height / vid.videoHeight; offsetX = (canv.width - vid.videoWidth * scale) / 2; }
+  } else {
+    scale = Math.max(canv.width / vid.videoWidth, canv.height / vid.videoHeight);
+    offsetX = (canv.width - vid.videoWidth * scale) / 2; offsetY = (canv.height - vid.videoHeight * scale) / 2;
   }
+  return kps.map(kp => ({ ...kp, x: kp.x * scale + offsetX, y: kp.y * scale + offsetY }));
 }
 
-function showToast(m) {
-  const t = document.getElementById('toast');
-  t.textContent = m;
-  t.classList.add('opacity-100', 'translate-y-0');
-  setTimeout(() => t.classList.remove('opacity-100', 'translate-y-0'), 2500);
+function drawSkeleton(ctx, pose, canv, vid) {
+  const scaledKps = getCorrectScaling(pose.keypoints, canv, vid);
+  ctx.strokeStyle = '#00F5FF'; ctx.lineWidth = 2;
+  [[5,6],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]].forEach(([i,j])=>{
+    const a = scaledKps[i], b = scaledKps[j];
+    if(a.score > 0.3 && b.score > 0.3){ ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+  });
 }
 
-function calcFPS(t) {
-  if (STATE.lastFpsT) {
-    const d = t - STATE.lastFpsT;
-    if (d > 0) STATE.fps = Math.round(1000 / d);
-    if (Math.random() > 0.9) document.getElementById('fps-badge').textContent = STATE.fps + ' FPS';
-  }
-  STATE.lastFpsT = t;
-}
+function shareResult() { const text = `🚀 Sprint: ${STATE.topSpeed.toFixed(1)} km/h\n#SprintTrackPro`; if(navigator.share) navigator.share({title:'SprintTrack',text}); else showToast('Kopiert'); }
 
-function setLoaderText(t) { document.getElementById('loader-text').textContent = t; }
+function openUploadModal() { document.getElementById('upload-modal').classList.remove('hidden'); }
+function closeUploadModal() { document.getElementById('upload-modal').classList.add('hidden'); }
 
-function speak(t) {
-  if ('speechSynthesis' in window) {
-    const u = new SpeechSynthesisUtterance(t);
-    u.rate = 1.2; u.pitch = 1.1; u.volume = 0.5;
-    speechSynthesis.speak(u);
-  }
-}
-
-function beep(freq, dur) {
-  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.connect(gain); gain.connect(audioCtx.destination);
-  osc.frequency.value = freq; gain.gain.value = 0.1;
-  osc.start(); setTimeout(() => { osc.stop(); audioCtx.close(); }, dur * 1000);
-}
-
-function shareResult() {
-  const text = `🚀 Mein Sprint-Ergebnis:\n⚡ Top-Speed: ${STATE.topSpeed.toFixed(1)} km/h\n🎮 EA FC Pace: ${Math.round((STATE.topSpeed - 15) * 4.5)}\n#SprintTrackPro #AI`;
-  if (navigator.share) navigator.share({ title: 'SprintTrack Pro', text });
-  else { navigator.clipboard.writeText(text); showToast('Kopiert!'); }
-}
-
-// ── BOOT ──────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', initApp);
 </script>
 </body>
