@@ -203,10 +203,10 @@ input[type="range"]::-webkit-slider-thumb {
   <!-- HEADER -->
   <header id="header" class="shrink-0 flex items-center justify-between px-4 pt-[calc(14px+var(--safe-top))] pb-3 bg-[#05050A]/95 border-b border-white/10 backdrop-blur-xl z-[100]">
     <div class="flex items-center gap-3">
-      <div class="w-9 h-9 bg-gradient-to-br from-[#00F5FF] to-[#0090FF] rounded-lg flex items-center justify-center text-lg shadow-[0_0_15px_rgba(0,245,255,0.4)]">⚡</div>
+      <div class="w-10 h-10 bg-gradient-to-br from-[#00F5FF] to-[#0060FF] rounded-xl flex items-center justify-center text-xl shadow-[0_0_20px_rgba(0,144,255,0.5)]">⚡</div>
       <div class="flex flex-col leading-tight">
-        <span class="text-[16px] font-bold bg-gradient-to-r from-[#00F5FF] to-[#0090FF] bg-clip-text text-transparent">SprintTrack Pro</span>
-        <span class="text-[9px] font-semibold text-white/40 tracking-[1.5px] uppercase">Elite Analyzer</span>
+        <span class="text-[18px] font-black bg-gradient-to-r from-[#00F5FF] to-[#0090FF] bg-clip-text text-transparent tracking-tight">SprintTrack Pro</span>
+        <span class="text-[10px] font-bold text-blue-400/60 tracking-[2px] uppercase">Elite Solo Analyzer</span>
       </div>
     </div>
     <div class="flex items-center gap-2">
@@ -293,9 +293,9 @@ input[type="range"]::-webkit-slider-thumb {
         <button id="btn-cal-main" onclick="openCalModal()" class="flex-[2] flex items-center justify-center gap-2 py-4.5 bg-white/10 border border-white/20 rounded-[28px] text-[14px] font-black text-white active:scale-95 transition-all">
           📏 KALIBRIEREN
         </button>
-        <button id="btn-skip" onclick="useDefaultCal()" class="flex-1 flex flex-col items-center justify-center bg-blue-500/10 border border-blue-400/30 rounded-[28px] active:scale-95 transition-all text-blue-400">
+        <button id="btn-skip" class="flex-1 flex flex-col items-center justify-center bg-blue-500/20 border border-blue-400/40 rounded-[28px] active:scale-90 transition-all text-blue-400 shadow-[0_0_15px_rgba(0,144,255,0.2)]">
           <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M13 5l7 7-7 7M5 5l7 7-7 7"></path></svg>
-          <span class="text-[8px] font-black uppercase">Skip</span>
+          <span class="text-[10px] font-black uppercase">Schnellstart</span>
         </button>
       </div>
       
@@ -474,22 +474,26 @@ async function initApp() {
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
   
+  // Bind buttons manually to ensure iOS compatibility
+  const skipBtn = document.getElementById('btn-skip');
+  if (skipBtn) {
+    skipBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      useDefaultCal();
+    });
+  }
+
   try {
-    // FORCE LIGHTNING ON ALL DEVICES FOR SPEED
     await tf.setBackend('webgl');
     await tf.ready();
-    
     setLoaderText(`SprintTrack AI lädt...`);
-    
     STATE.detector = await poseDetection.createDetector(
       poseDetection.SupportedModels.MoveNet,
       { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
     );
-    
     setLoaderText('Bereit');
     document.getElementById('loading-overlay').classList.add('opacity-0');
     setTimeout(() => document.getElementById('loading-overlay').style.display = 'none', 500);
-    
     startCamera();
     renderHistory();
   } catch(e) {
@@ -498,28 +502,32 @@ async function initApp() {
 }
 
 function useDefaultCal() {
+  console.log("Using default calibration...");
   STATE.pxPerMeter = 160; 
   STATE.calibrated = true;
   
-  // Update UI
   const statusText = document.getElementById('cal-status-text');
-  if (statusText) {
-    statusText.textContent = 'Bereit: Standard-Setup aktiv';
-    statusText.parentElement.style.backgroundColor = 'rgba(0, 245, 255, 0.1)';
-  }
-  
+  const statusPill = document.getElementById('cal-status');
   const startBtn = document.getElementById('btn-start');
   const soloBtn = document.getElementById('btn-solo');
+
+  if (statusText) statusText.textContent = 'Bereit: Standard aktiv';
+  if (statusPill) statusPill.style.backgroundColor = 'rgba(0, 245, 255, 0.2)';
   
   if (startBtn) {
     startBtn.disabled = false;
+    startBtn.removeAttribute('disabled'); // Ensure attribute is gone
     startBtn.classList.add('animate-pulse');
+    startBtn.style.opacity = "1";
   }
   if (soloBtn) {
     soloBtn.disabled = false;
+    soloBtn.removeAttribute('disabled');
+    soloBtn.style.opacity = "1";
   }
   
-  showToast('Setup übersprungen - bereit!');
+  showToast('Setup übersprungen - GO!');
+  beep(400, 0.1); // Small feedback sound
 }
 
 function startMeasurement(isSolo = false) {
