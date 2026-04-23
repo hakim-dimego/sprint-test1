@@ -210,6 +210,9 @@ input[type="range"]::-webkit-slider-thumb {
       </div>
     </div>
     <div class="flex items-center gap-2">
+      <button onclick="switchCamera()" class="p-2 bg-blue-500/20 rounded-full border border-blue-400/30 active:scale-90 transition-transform text-blue-400">
+        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M4 4h5M4 4v5m0-5l6 6m10 10h-5m5 0v-5m0 5l-6-6M9 20H4m0 0v-5m0 5l6-6M20 4h-5m5 0v5m0-5l-6 6"></path></svg>
+      </button>
       <button onclick="toggleHistory()" class="p-2 bg-white/5 rounded-full border border-white/10 active:scale-90 transition-transform">
         <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
       </button>
@@ -443,13 +446,15 @@ const STATE = {
   frameCount:    0,
   confSum:       0,
   lastX:         null,
+  lastY:         null,
   lastT:         null,
   calInProgress: false,
   calSamples:    [],
   results:       JSON.parse(localStorage.getItem('st_results') || '[]'),
   fps:           0,
   lastFpsT:      null,
-  runningFrame:  false
+  runningFrame:  false,
+  facingMode:    'environment' // Start with back camera
 };
 
 // Keypoints indices
@@ -503,22 +508,54 @@ function resizeCanvas() {
 
 async function startCamera() {
   try {
-    const constraints = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
+    if (STATE.stream) {
+      STATE.stream.getTracks().forEach(track => track.stop());
+    }
+
+    const constraints = { 
+      video: { 
+        facingMode: { ideal: STATE.facingMode }, 
+        width: { ideal: 1280 }, 
+        height: { ideal: 720 } 
+      } 
+    };
+    
     STATE.stream = await navigator.mediaDevices.getUserMedia(constraints);
     const video = document.getElementById('video');
     video.srcObject = STATE.stream;
     
+    // Mirror ONLY if front camera is used
+    if (STATE.facingMode === 'user') {
+      video.style.transform = 'scaleX(-1)';
+      document.getElementById('canvas').style.transform = 'scaleX(-1)';
+    } else {
+      video.style.transform = 'none';
+      document.getElementById('canvas').style.transform = 'none';
+    }
+
     video.onloadedmetadata = () => {
       video.play();
       video.classList.add('ready');
       document.getElementById('no-camera').style.display = 'none';
       STATE.ready = true;
-      startLoop();
+      // startLoop is called only once in initApp via startCamera
+      if (!STATE.loopStarted) {
+        startLoop();
+        STATE.loopStarted = true;
+      }
     };
   } catch(e) {
     console.error(e);
     document.getElementById('no-camera').style.display = 'flex';
   }
+}
+
+async function switchCamera() {
+  STATE.facingMode = (STATE.facingMode === 'environment') ? 'user' : 'environment';
+  STATE.ready = false;
+  document.getElementById('video').classList.remove('ready');
+  showToast(STATE.facingMode === 'user' ? 'Selfie-Kamera' : 'Hauptkamera');
+  await startCamera();
 }
 
 // ── LOOP ──────────────────────────────────────────────────────────
