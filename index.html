@@ -2,62 +2,92 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SprintTrack Pro | Final Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SprintTrack AI | Auto-Trigger</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
     <style>
-        body { background: #050505; color: white; font-family: sans-serif; overflow: hidden; }
-        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        body { background: #05050A; color: #fff; font-family: sans-serif; overflow: hidden; height: 100dvh; }
+        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(15px); border: 1px solid rgba(255, 255, 255, 0.1); }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
+        .recording-pulse { animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
 
-<div class="relative w-full h-screen flex flex-col">
-    <div class="relative flex-[3] bg-black">
+<div class="relative w-full h-full flex flex-col">
+    <div class="relative flex-1 bg-black overflow-hidden">
         <video id="video" playsinline muted></video>
         <canvas id="canvas"></canvas>
-        <div id="status" class="absolute top-5 left-5 glass px-4 py-2 rounded-full text-xs font-bold text-cyan-400">Warte auf Video...</div>
+        
+        <div class="absolute top-6 inset-x-6 flex justify-between items-start z-50">
+            <div class="glass px-4 py-2 rounded-2xl flex items-center gap-3">
+                <div id="status-led" class="w-3 h-3 rounded-full bg-yellow-500"></div>
+                <span id="status-text" class="text-[10px] font-black uppercase tracking-widest">KI Initialisiert...</span>
+            </div>
+            
+            <div id="speed-box" class="hidden glass p-4 rounded-3xl border border-cyan-400/50">
+                <div class="text-[10px] uppercase opacity-50 font-bold">Max Speed</div>
+                <div class="flex items-baseline gap-1">
+                    <span id="max-speed" class="text-4xl font-black italic text-cyan-400">0.0</span>
+                    <span class="text-xs font-bold">KM/H</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="start-hint" class="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div class="glass p-8 rounded-[3rem] text-center border border-white/10">
+                <h2 class="text-2xl font-black uppercase tracking-tighter italic">Bereit zum Tracken</h2>
+                <p class="text-xs opacity-60 mt-2">Video starten. KI erkennt den Sprint automatisch.</p>
+            </div>
+        </div>
     </div>
 
-    <div class="flex-1 glass p-6 flex flex-col gap-4">
-        <div class="flex justify-between items-center">
-            <h1 class="text-xl font-black italic text-cyan-400">TOP SPEED TRACKER</h1>
+    <div class="glass p-6 pb-10 flex flex-col gap-4 z-50">
+        <div class="flex gap-4">
+            <button onclick="document.getElementById('file-input').click()" class="flex-1 py-4 bg-white/5 rounded-2xl text-[10px] font-bold uppercase tracking-widest border border-white/10">📁 Video wählen</button>
             <input type="file" id="file-input" hidden accept="video/*" onchange="handleFile(event)">
-            <button onclick="document.getElementById('file-input').click()" class="bg-white/10 px-4 py-2 rounded-lg text-xs font-bold uppercase">Video wählen</button>
+            
+            <div class="flex-1">
+                <input type="number" id="user-height" value="1.80" step="0.01" class="w-full h-full bg-white/5 border border-white/10 rounded-2xl px-4 text-cyan-400 font-bold outline-none text-center">
+            </div>
         </div>
         
-        <div class="flex gap-4 items-center">
-            <div class="flex-1">
-                <label class="text-[10px] uppercase opacity-50 block mb-1">Körpergröße (m)</label>
-                <input type="number" id="user-height" value="1.80" step="0.01" class="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-cyan-400 outline-none">
-            </div>
-            <button id="run-btn" onclick="startAnalysis()" class="flex-[2] bg-cyan-500 text-black py-4 rounded-xl font-black uppercase tracking-widest shadow-lg shadow-cyan-500/30">Analyse Starten</button>
-        </div>
+        <button id="master-btn" onclick="toggleAI()" class="w-full py-5 bg-cyan-500 rounded-3xl text-black font-black text-lg uppercase tracking-[3px] shadow-lg shadow-cyan-500/20">Analyse Starten</button>
     </div>
 </div>
 
-<div id="result" class="hidden fixed inset-0 z-[100] bg-black/90 flex items-center justify-center">
-    <div class="bg-gradient-to-br from-yellow-400 to-amber-600 p-10 rounded-[3rem] text-center text-slate-900 shadow-2xl">
-        <h2 id="pace" class="text-8xl font-black italic">0</h2>
-        <p class="text-xl font-bold uppercase">PAC (Top Speed)</p>
-        <p id="kmh" class="text-2xl font-black mt-4 border-t border-black/20 pt-4">0.0 KM/H</p>
-        <button onclick="location.reload()" class="mt-8 bg-black text-white px-8 py-3 rounded-full font-bold uppercase text-xs">Neu starten</button>
+<div id="result-overlay" class="hidden fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-6">
+    <div class="text-center">
+        <div class="w-64 h-96 rounded-[3rem] bg-gradient-to-br from-amber-200 to-amber-500 p-10 text-slate-900 shadow-2xl relative">
+            <div class="text-7xl font-black italic leading-none" id="res-pace">0</div>
+            <div class="text-xl font-bold italic uppercase">PAC</div>
+            <div class="mt-16 border-b-2 border-black/20 text-2xl font-black italic pb-2">SPRINTER</div>
+            <div class="mt-4 font-black text-lg" id="res-kmh">0.0 KM/H</div>
+        </div>
+        <button onclick="location.reload()" class="mt-10 py-4 px-10 glass rounded-full font-bold uppercase text-xs">Neu starten</button>
     </div>
 </div>
 
 <script>
-    let detector, isRunning = false, peakKmh = 0, lastPos = null, lastTime = null;
+    let detector, isRunning = false, peakKmh = 0;
+    let lastPos = null, lastTime = null;
+    let movementHistory = [];
+    
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
 
-    async function init() {
-        // "MoveNet" ist schneller als BlazePose und oft besser für Web-Apps auf iPhones
-        detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, { modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER });
-        document.getElementById('status').innerText = "Bereit";
+    async function initAI() {
+        const model = poseDetection.SupportedModels.MoveNet;
+        detector = await poseDetection.createDetector(model, { 
+            modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER 
+        });
+        document.getElementById('status-text').innerText = "Bereit für Upload";
         loop();
     }
 
@@ -68,16 +98,20 @@
             video.onloadedmetadata = () => {
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
-                document.getElementById('status').innerText = "Video geladen";
+                document.getElementById('status-text').innerText = "Video bereit";
             };
         }
     }
 
-    function startAnalysis() {
-        if (!video.src) return;
-        video.currentTime = 0;
-        peakKmh = 0;
+    function toggleAI() {
+        if (!video.src) return alert("Zuerst Video wählen!");
         isRunning = true;
+        peakKmh = 0;
+        movementHistory = [];
+        document.getElementById('start-hint').classList.add('hidden');
+        document.getElementById('speed-box').classList.remove('hidden');
+        document.getElementById('status-led').classList.add('recording-pulse', 'bg-red-500');
+        document.getElementById('status-text').innerText = "KI Scannt...";
         video.play();
     }
 
@@ -88,11 +122,8 @@
             
             if (poses && poses[0]) {
                 const pose = poses[0];
-                draw(pose);
-                if (isRunning) calculate(pose);
-                document.getElementById('status').innerText = "Person erkannt";
-            } else {
-                document.getElementById('status').innerText = "Suche Person...";
+                drawPose(pose);
+                if (isRunning) processSpeed(pose);
             }
 
             if (isRunning && video.ended) {
@@ -103,49 +134,66 @@
         requestAnimationFrame(loop);
     }
 
-    function calculate(pose) {
+    function processSpeed(pose) {
         const k = pose.keypoints;
         const h = parseFloat(document.getElementById('user-height').value) || 1.80;
         
-        // Nutze den Abstand zwischen Schulter und Knöchel für die Skalierung (stabiler als ganze Größe)
-        const shoulder = k.find(p => p.name === 'left_shoulder' || p.name === 'right_shoulder');
-        const ankle = k.find(p => p.name === 'left_ankle' || p.name === 'right_ankle');
-        const hip = k.find(p => p.name === 'left_hip' || p.name === 'right_hip');
-
-        if (shoulder && ankle && hip && shoulder.score > 0.3 && ankle.score > 0.3) {
-            const pxH = Math.abs(ankle.y - shoulder.y);
-            const curX = hip.x;
+        // Stabilste Punkte für Distanz-Kalibrierung: Kopf zu Knöchel
+        const head = k[0];
+        const ankle = (k[15].score > k[16].score) ? k[15] : k[16];
+        const hip = (k[11].x + k[12].x) / 2; // Hüft-Zentrum als Messpunkt
+        
+        if (head.score > 0.4 && ankle.score > 0.4) {
+            const pxHeight = Math.abs(ankle.y - head.y);
             const now = video.currentTime;
 
             if (lastPos && now !== lastTime) {
                 const dt = now - lastTime;
-                const dx = Math.abs(curX - lastPos);
-                const kmh = ((dx / (pxH / (h * 0.75))) / dt) * 3.6; // 0.75 Korrekturfaktor Schulter-Ankle
+                const dx = Math.abs(hip - lastPos);
+                
+                // Umrechnung Pixel -> Meter -> KM/H
+                const metersPerPixel = h / pxHeight;
+                const speedKmh = ((dx * metersPerPixel) / dt) * 3.6;
 
-                if (kmh < 45 && kmh > 2) peakKmh = Math.max(peakKmh, kmh);
+                // AUTO-TRIGGER LOGIK:
+                // Wir speichern die Geschwindigkeit in einer Historie, um Ausreißer zu filtern
+                movementHistory.push(speedKmh);
+                if (movementHistory.length > 5) movementHistory.shift();
+                
+                const avgSpeed = movementHistory.reduce((a,b) => a+b, 0) / movementHistory.length;
+
+                // Ignoriere "Zittern" unter 5 km/h, erkenne alles darüber als Sprint-Action
+                if (avgSpeed > 5 && avgSpeed < 45) {
+                    peakKmh = Math.max(peakKmh, avgSpeed);
+                    document.getElementById('max-speed').innerText = peakKmh.toFixed(1);
+                    document.getElementById('status-text').innerText = "Sprint erkannt!";
+                }
             }
-            lastPos = curX;
+            lastPos = hip;
             lastTime = now;
         }
     }
 
-    function draw(pose) {
+    function drawPose(pose) {
         ctx.fillStyle = "#00F5FF";
         pose.keypoints.forEach(kp => {
-            if (kp.score > 0.3) {
-                ctx.beginPath(); ctx.arc(kp.x, kp.y, 6, 0, Math.PI*2); ctx.fill();
+            if (kp.score > 0.4) {
+                ctx.beginPath();
+                ctx.arc(kp.x, kp.y, 5, 0, Math.PI*2);
+                ctx.fill();
             }
         });
     }
 
     function showResult() {
         const pace = Math.min(99, Math.round(((peakKmh - 15) / 23) * 57 + 40));
-        document.getElementById('pace').innerText = pace;
-        document.getElementById('kmh').innerText = peakKmh.toFixed(1) + " KM/H";
-        document.getElementById('result').classList.remove('hidden');
+        document.getElementById('res-pace').innerText = pace;
+        document.getElementById('res-kmh').innerText = peakKmh.toFixed(1) + " KM/H";
+        document.getElementById('result-overlay').classList.remove('hidden');
+        confetti({ particleCount: 150, spread: 70 });
     }
 
-    init();
+    initAI();
 </script>
 </body>
 </html>
