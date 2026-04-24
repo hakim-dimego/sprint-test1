@@ -3,178 +3,168 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SprintTrack Pro | Fixed</title>
+    <title>SprintTrack Pro | Final Sync</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
     <script src="https://cdn.tailwindcss.com"></script>
 
     <style>
         body { background: #000; color: #fff; font-family: sans-serif; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
-        #video-viewport { position: relative; flex: 1; background: #050505; overflow: hidden; }
+        #viewport { position: relative; flex: 1; background: #000; }
         video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
-        
-        .line { position: absolute; top: 0; bottom: 0; width: 4px; z-index: 50; cursor: ew-resize; transition: opacity 0.3s; }
+        .line { position: absolute; top: 0; bottom: 0; width: 4px; z-index: 100; cursor: ew-resize; }
         .line-start { background: #00f5ff; box-shadow: 0 0 15px #00f5ff; }
         .line-end { background: #ff3b30; box-shadow: 0 0 15px #ff3b30; }
-        .label { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: inherit; color: #000; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 900; }
-        
-        .person-focus { position: absolute; width: 60px; height: 60px; border: 2px dashed #fff; border-radius: 50%; z-index: 60; transform: translate(-50%, -50%); pointer-events: none; }
+        .label { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: inherit; color: #000; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 900; pointer-events: none; }
+        .person-focus { position: absolute; width: 60px; height: 60px; border: 2px dashed #fff; border-radius: 50%; z-index: 110; transform: translate(-50%, -50%); cursor: move; }
     </style>
 </head>
 <body>
 
-    <div class="p-4 bg-zinc-900 border-b border-white/10 flex justify-between items-center z-[100]">
-        <div>
-            <h1 class="text-cyan-400 font-black italic text-lg uppercase tracking-tighter">SprintTrack v3</h1>
-            <p id="status" class="text-[9px] text-white/50 uppercase font-bold">Warte auf Modell...</p>
-        </div>
-        <div id="result-display" class="hidden bg-cyan-500 text-black px-4 py-1 rounded-full font-black text-sm">
-            <span id="res-val">0.0</span> km/h
-        </div>
+    <div class="p-4 bg-zinc-900 border-b border-white/10 flex justify-between items-center">
+        <h1 class="text-cyan-400 font-black italic uppercase">SprintTrack v4</h1>
+        <div id="status-pill" class="bg-white/5 px-3 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest text-white/50 border border-white/10">Warte...</div>
     </div>
 
-    <div id="video-viewport" 
-         onmousedown="startDrag(event)" ontouchstart="startDrag(event)" 
-         onmousemove="moveDrag(event)" ontouchmove="moveDrag(event)" 
-         onmouseup="endDrag()" ontouchend="endDrag()">
-        
-        <video id="video" playsinline muted></video>
+    <div id="viewport" onmousedown="startDrag(event)" ontouchstart="startDrag(event)" onmousemove="moveDrag(event)" ontouchmove="moveDrag(event)" onmouseup="endDrag()" ontouchend="endDrag()">
+        <video id="video" playsinline muted preload="auto"></video>
         <canvas id="canvas"></canvas>
 
-        <div id="ui-start" class="line line-start hidden" style="left: 20%"><span class="label">START</span></div>
-        <div id="ui-end" class="line line-end hidden" style="left: 80%"><span class="label">ZIEL</span></div>
+        <div id="ui-start" class="line line-start hidden" style="left: 15%"><span class="label">START</span></div>
+        <div id="ui-end" class="line line-end hidden" style="left: 85%"><span class="label">ZIEL</span></div>
         <div id="ui-person" class="person-focus hidden" style="left: 50%; top: 50%"></div>
     </div>
 
-    <div class="p-6 bg-zinc-900 border-t border-white/10 space-y-4 z-[100]">
+    <div class="p-6 bg-zinc-900 border-t border-white/10 space-y-4">
         <div class="flex gap-3">
-            <button onclick="document.getElementById('file-input').click()" class="flex-1 bg-white/10 py-4 rounded-xl text-[10px] font-bold uppercase tracking-widest border border-white/20">📁 Video wählen</button>
+            <button onclick="document.getElementById('file-input').click()" class="flex-1 bg-white/10 py-4 rounded-xl text-[10px] font-bold uppercase">📁 Video wählen</button>
             <input type="file" id="file-input" hidden accept="video/*" onchange="loadVideo(event)">
-            
-            <div class="w-24 bg-white/5 rounded-xl border border-white/10 flex flex-col items-center justify-center">
-                <span class="text-[8px] opacity-50 font-bold uppercase">Meter</span>
-                <input type="number" id="dist" value="20" class="bg-transparent text-center font-bold text-cyan-400 w-full outline-none">
-            </div>
+            <input type="number" id="dist" value="20" class="w-16 bg-white/5 border border-white/10 rounded-xl text-center font-bold text-cyan-400 outline-none">
         </div>
-
-        <button id="btn-run" disabled onclick="startAnalysis()" class="w-full py-5 bg-cyan-500 text-black font-black rounded-2xl uppercase tracking-[3px] shadow-lg shadow-cyan-500/20 disabled:opacity-20 disabled:grayscale transition-all">
-            Analyse Starten
-        </button>
+        <button id="btn-run" disabled onclick="run()" class="w-full py-5 bg-cyan-500 text-black font-black rounded-2xl uppercase tracking-[3px] disabled:opacity-20">Analyse Starten</button>
     </div>
 
 <script>
-    let detector, activeObj = null, isPlaying = false;
-    let config = { start: 20, end: 80, dist: 20 };
+    let detector, activeObj = null, analyzing = false;
+    let config = { start: 15, end: 85, person: {x: 50, y: 50} };
     let startT = null, endT = null;
 
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
 
-    // 1. KI Initialisieren
     async function init() {
+        // Wir nutzen das schnellste verfügbare Modell
         detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, { modelType: 'thunder' });
-        document.getElementById('status').innerText = "Bereit zum Laden";
-        render();
+        document.getElementById('status-pill').innerText = "Bereit";
+        animate();
     }
 
-    // 2. Video Laden
     function loadVideo(e) {
         const file = e.target.files[0];
         if (!file) return;
         video.src = URL.createObjectURL(file);
-        video.onloadedmetadata = () => {
+        video.onloadeddata = () => {
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
-            document.getElementById('ui-start').classList.remove('hidden');
-            document.getElementById('ui-end').classList.remove('hidden');
-            document.getElementById('ui-person').classList.remove('hidden');
+            document.querySelectorAll('#ui-start, #ui-end, #ui-person').forEach(el => el.classList.remove('hidden'));
             document.getElementById('btn-run').disabled = false;
-            document.getElementById('status').innerText = "Linien einstellen";
+            document.getElementById('status-pill').innerText = "Ready";
         };
     }
 
-    // 3. Drag & Drop Logik
     function startDrag(e) {
         const x = e.touches ? e.touches[0].clientX : e.clientX;
-        const target = e.target.closest('.line');
+        const target = e.target.closest('.line, .person-focus');
         if (target) activeObj = target.id;
     }
 
     function moveDrag(e) {
         if (!activeObj) return;
-        const rect = document.getElementById('video-viewport').getBoundingClientRect();
+        const rect = document.getElementById('viewport').getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        const xPercent = ((clientX - rect.left) / rect.width) * 100;
-        
-        if (xPercent >= 0 && xPercent <= 100) {
-            document.getElementById(activeObj).style.left = xPercent + '%';
-            if (activeObj === 'ui-start') config.start = xPercent;
-            if (activeObj === 'ui-end') config.end = xPercent;
-        }
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const xP = ((clientX - rect.left) / rect.width) * 100;
+        const yP = ((clientY - rect.top) / rect.height) * 100;
+
+        const el = document.getElementById(activeObj);
+        el.style.left = xP + '%';
+        if (activeObj === 'ui-person') { el.style.top = yP + '%'; config.person = {x: xP, y: yP}; }
+        if (activeObj === 'ui-start') config.start = xP;
+        if (activeObj === 'ui-end') config.end = xP;
     }
 
     function endDrag() { activeObj = null; }
 
-    // 4. Analyse Starten
-    function startAnalysis() {
+    async function run() {
         if (!video.src) return;
-        isPlaying = true;
-        startT = null;
-        endT = null;
+        // Reset
+        analyzing = true; startT = null; endT = null;
         video.currentTime = 0;
-        document.getElementById('status').innerText = "KI Scannt...";
-        document.getElementById('result-display').classList.add('hidden');
-        video.play();
+        document.getElementById('ui-person').classList.add('hidden');
+        document.getElementById('status-pill').innerText = "Scanning...";
+        
+        // WICHTIG: Force Play für Browser
+        try {
+            await video.play();
+        } catch (err) {
+            console.error("Video Play Error:", err);
+            alert("Fehler beim Abspielen. Bitte klick nochmal auf Analyse.");
+        }
     }
 
-    // 5. Analyse Loop
-    async function render() {
+    async function animate() {
         if (video.readyState >= 2) {
-            const poses = await detector.estimatePoses(video);
+            const poses = await detector.estimatePoses(video, { flipHorizontal: false });
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            if (poses[0]) {
-                const hip = (poses[0].keypoints[11].x + poses[0].keypoints[12].x) / 2;
-                const hipRel = (hip / canvas.width) * 100;
-                
-                // Zeichne KI-Punkt
+            if (poses && poses[0]) {
+                const p = poses[0].keypoints;
+                // Wir nehmen die Hüfte (Punkt 11 & 12)
+                const hipX = (p[11].x + p[12].x) / 2;
+                const hipY = (p[11].y + p[12].y) / 2;
+                const hipRel = (hipX / canvas.width) * 100;
+
+                // Zeichne KI-Tracker
                 ctx.fillStyle = "#00f5ff";
                 ctx.beginPath();
-                ctx.arc(hip, (poses[0].keypoints[11].y + poses[0].keypoints[12].y)/2, 10, 0, 7);
+                ctx.arc(hipX, hipY, 12, 0, 7);
                 ctx.fill();
+                ctx.strokeStyle = "white";
+                ctx.lineWidth = 3;
+                ctx.stroke();
 
-                if (isPlaying) {
+                if (analyzing) {
                     const dir = config.end > config.start ? 1 : -1;
                     
-                    // Trigger Start
+                    // START LOGIK
                     if (!startT && (dir === 1 ? hipRel >= config.start : hipRel <= config.start)) {
                         startT = video.currentTime;
+                        document.getElementById('status-pill').innerText = "Running...";
+                        document.getElementById('status-pill').classList.add('text-green-400');
                     }
 
-                    // Trigger Ziel (Harter Stop)
+                    // ZIEL LOGIK (ABBRUCH)
                     if (startT && !endT && (dir === 1 ? hipRel >= config.end : hipRel <= config.end)) {
                         endT = video.currentTime;
-                        finish();
+                        analyzing = false;
+                        video.pause();
+                        complete();
                     }
                 }
+            } else if (analyzing) {
+                document.getElementById('status-pill').innerText = "Person lost...";
             }
         }
-        requestAnimationFrame(render);
+        requestAnimationFrame(animate);
     }
 
-    function finish() {
-        isPlaying = false;
-        video.pause();
-        const duration = endT - startT;
-        const distance = parseFloat(document.getElementById('dist').value);
-        const speedKmh = (distance / duration) * 3.6;
-
-        document.getElementById('status').innerText = "Analyse beendet";
-        document.getElementById('res-val').innerText = speedKmh.toFixed(1);
-        document.getElementById('result-display').classList.remove('hidden');
-        
-        alert(`ERGEBNIS:\nZeit: ${duration.toFixed(2)}s\nSpeed: ${speedKmh.toFixed(1)} km/h`);
+    function complete() {
+        const diff = endT - startT;
+        const d = parseFloat(document.getElementById('dist').value);
+        const kmh = (d / diff) * 3.6;
+        document.getElementById('status-pill').innerText = "Done";
+        alert(`SPRINT FERTIG!\nZeit: ${diff.toFixed(2)}s\nGeschwindigkeit: ${kmh.toFixed(1)} km/h`);
     }
 
     init();
