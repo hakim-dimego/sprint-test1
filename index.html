@@ -3,71 +3,55 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SprintTrack Pro | Drag-Fix</title>
+    <title>SprintTrack Pro | AI Feedback</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
     <script src="https://cdn.tailwindcss.com"></script>
 
     <style>
-        body { background: #000; color: #fff; font-family: sans-serif; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; touch-action: none; }
-        #viewport { position: relative; flex: 1; background: #000; touch-action: none; }
+        body { background: #000; color: #fff; font-family: sans-serif; height: 100dvh; overflow: hidden; touch-action: none; }
+        #viewport { position: relative; flex: 1; background: #000; }
         video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
-        
-        /* Draggable UI */
         .drag-layer { position: absolute; inset: 0; z-index: 100; }
-        
-        .line { position: absolute; top: 0; bottom: 0; width: 20px; transform: translateX(-50%); cursor: ew-resize; display: flex; align-items: center; justify-content: center; }
-        .line::after { content: ''; width: 4px; height: 100%; box-shadow: 0 0 15px rgba(0,0,0,0.5); }
+        .line { position: absolute; top: 0; bottom: 0; width: 30px; transform: translateX(-50%); cursor: ew-resize; display: flex; justify-content: center; }
+        .line::after { content: ''; width: 4px; height: 100%; }
         .line-start::after { background: #00f5ff; box-shadow: 0 0 15px #00f5ff; }
         .line-end::after { background: #ff3b30; box-shadow: 0 0 15px #ff3b30; }
-        
-        .handle-label { position: absolute; top: 40px; background: inherit; color: #000; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 900; }
-
-        .person-focus { 
-            position: absolute; 
-            width: 80px; 
-            height: 80px; 
-            border: 3px dashed #fff; 
-            border-radius: 50%; 
-            transform: translate(-50%, -50%); 
-            cursor: move; 
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(255,255,255,0.1);
-        }
-        .person-focus::before { content: 'PERSON'; font-size: 8px; font-weight: bold; }
+        .person-focus { position: absolute; width: 70px; height: 70px; border: 3px dashed #fff; border-radius: 50%; transform: translate(-50%, -50%); cursor: move; background: rgba(255,255,255,0.1); }
     </style>
 </head>
-<body>
+<body class="flex flex-col">
 
-    <div class="p-4 bg-zinc-900 border-b border-white/10 flex justify-between items-center z-[110]">
-        <h1 class="text-cyan-400 font-black italic uppercase">SprintTrack v5</h1>
-        <div id="status-pill" class="bg-white/5 px-3 py-1 rounded-full text-[9px] font-bold uppercase text-white/50 border border-white/10">Warte...</div>
+    <div class="p-4 bg-zinc-900 flex justify-between items-center border-b border-white/10">
+        <div>
+            <h1 class="text-cyan-400 font-black italic uppercase text-sm">SprintTrack v6</h1>
+            <p id="ai-status" class="text-[10px] font-bold text-red-500 uppercase">KI sucht Person...</p>
+        </div>
+        <div id="live-kmh" class="bg-zinc-800 px-4 py-1 rounded-full font-black text-cyan-400 text-xl italic">0.0</div>
     </div>
 
     <div id="viewport">
-        <video id="video" playsinline muted preload="auto"></video>
+        <video id="video" playsinline muted></video>
         <canvas id="canvas"></canvas>
 
         <div class="drag-layer" onmousedown="startDrag(event)" ontouchstart="startDrag(event)">
-            <div id="ui-start" class="line line-start hidden" style="left: 20%"><span class="handle-label" style="background:#00f5ff">START</span></div>
-            <div id="ui-end" class="line line-end hidden" style="left: 80%"><span class="handle-label" style="background:#ff3b30">ZIEL</span></div>
+            <div id="ui-start" class="line line-start hidden" style="left: 20%"></div>
+            <div id="ui-end" class="line line-end hidden" style="left: 80%"></div>
             <div id="ui-person" class="person-focus hidden" style="left: 50%; top: 50%"></div>
         </div>
     </div>
 
     <div class="p-6 bg-zinc-900 border-t border-white/10 space-y-4 z-[110]">
         <div class="flex gap-3">
-            <button onclick="document.getElementById('file-input').click()" class="flex-1 bg-white/10 py-4 rounded-xl text-[10px] font-bold uppercase">📁 Video laden</button>
+            <button onclick="document.getElementById('file-input').click()" class="flex-1 bg-white/10 py-4 rounded-xl text-[10px] font-bold uppercase">📁 Video</button>
             <input type="file" id="file-input" hidden accept="video/*" onchange="loadVideo(event)">
-            <input type="number" id="dist" value="20" class="w-16 bg-white/5 border border-white/10 rounded-xl text-center font-bold text-cyan-400">
+            <input type="number" id="dist" value="20" class="w-16 bg-zinc-800 rounded-xl text-center font-bold text-cyan-400 border border-white/10">
         </div>
-        <button id="btn-run" disabled onclick="runAnalysis()" class="w-full py-5 bg-cyan-500 text-black font-black rounded-2xl uppercase tracking-[3px] disabled:opacity-20">Analyse Starten</button>
+        <button id="btn-run" disabled onclick="runAnalysis()" class="w-full py-5 bg-cyan-500 text-black font-black rounded-2xl uppercase tracking-widest disabled:opacity-20">Analyse Starten</button>
     </div>
 
 <script>
-    let detector, activeObj = null, analyzing = false;
+    let detector, activeObj = null, analyzing = false, lastPos = null, lastTime = null;
     let config = { start: 20, end: 80 };
     let startT = null, endT = null;
 
@@ -76,10 +60,11 @@
     const ctx = canvas.getContext('2d');
 
     async function init() {
+        // Wir erzwingen WebGL für bessere Performance
+        await tf.setBackend('webgl');
         detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, { modelType: 'thunder' });
-        document.getElementById('status-pill').innerText = "Bereit";
+        document.getElementById('ai-status').innerText = "KI BEREIT";
         
-        // Window-Events für flüssiges Dragging
         window.addEventListener('mousemove', moveDrag);
         window.addEventListener('touchmove', moveDrag, { passive: false });
         window.addEventListener('mouseup', endDrag);
@@ -97,45 +82,30 @@
             canvas.height = video.videoHeight;
             document.querySelectorAll('.hidden').forEach(el => el.classList.remove('hidden'));
             document.getElementById('btn-run').disabled = false;
-            document.getElementById('status-pill').innerText = "Marker setzen";
         };
     }
 
     function startDrag(e) {
         const target = e.target.closest('.line, .person-focus');
-        if (target) {
-            activeObj = target;
-            e.preventDefault();
-        }
+        if (target) activeObj = target;
     }
 
     function moveDrag(e) {
         if (!activeObj) return;
         const rect = document.getElementById('viewport').getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        
         const xP = ((clientX - rect.left) / rect.width) * 100;
-        const yP = ((clientY - rect.top) / rect.height) * 100;
-
-        if (xP >= 0 && xP <= 100) {
-            activeObj.style.left = xP + '%';
-            if (activeObj.id === 'ui-start') config.start = xP;
-            if (activeObj.id === 'ui-end') config.end = xP;
-        }
-        if (activeObj.id === 'ui-person' && yP >= 0 && yP <= 100) {
-            activeObj.style.top = yP + '%';
-        }
-        if(e.touches) e.preventDefault();
+        activeObj.style.left = xP + '%';
+        if (activeObj.id === 'ui-start') config.start = xP;
+        if (activeObj.id === 'ui-end') config.end = xP;
+        if (e.touches) e.preventDefault();
     }
 
     function endDrag() { activeObj = null; }
 
-    async function runAnalysis() {
+    function runAnalysis() {
         analyzing = true; startT = null; endT = null;
         video.currentTime = 0;
-        document.getElementById('ui-person').style.opacity = "0";
-        document.getElementById('status-pill').innerText = "Scanning...";
         video.play();
     }
 
@@ -144,33 +114,50 @@
             const poses = await detector.estimatePoses(video);
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            if (poses && poses[0]) {
+            if (poses && poses[0] && poses[0].keypoints[11].score > 0.3) {
                 const p = poses[0].keypoints;
                 const hipX = (p[11].x + p[12].x) / 2;
                 const hipY = (p[11].y + p[12].y) / 2;
                 const hipRel = (hipX / canvas.width) * 100;
 
-                // KI-Tracker Zeichnen
+                document.getElementById('ai-status').innerText = "PERSON ERKANNT";
+                document.getElementById('ai-status').className = "text-[10px] font-bold text-green-500 uppercase";
+
+                // LIVE TRACKER POINT
                 ctx.fillStyle = "#00f5ff";
-                ctx.beginPath(); ctx.arc(hipX, hipY, 12, 0, 7); ctx.fill();
-                ctx.strokeStyle = "white"; ctx.lineWidth = 3; ctx.stroke();
+                ctx.beginPath(); ctx.arc(hipX, hipY, 15, 0, 7); ctx.fill();
+                ctx.strokeStyle = "white"; ctx.lineWidth = 4; ctx.stroke();
 
                 if (analyzing) {
                     const dir = config.end > config.start ? 1 : -1;
+                    
+                    // Echtzeit KM/H Berechnung für das Display
+                    if (lastPos && video.currentTime !== lastTime) {
+                        const dt = video.currentTime - lastTime;
+                        const dx = Math.abs(hipRel - lastPos);
+                        const currentKmh = (dx * 0.5) / dt; // Grobe Schätzung für Live-Anzeige
+                        if(currentKmh < 45) document.getElementById('live-kmh').innerText = currentKmh.toFixed(1);
+                    }
+                    lastPos = hipRel; lastTime = video.currentTime;
+
+                    // START TRIGGER
                     if (!startT && (dir === 1 ? hipRel >= config.start : hipRel <= config.start)) {
                         startT = video.currentTime;
-                        document.getElementById('status-pill').innerText = "Running";
                     }
+
+                    // ZIEL TRIGGER
                     if (startT && !endT && (dir === 1 ? hipRel >= config.end : hipRel <= config.end)) {
                         endT = video.currentTime;
                         analyzing = false;
                         video.pause();
                         const time = endT - startT;
-                        const kmh = (parseFloat(document.getElementById('dist').value) / time) * 3.6;
-                        alert(`ERGEBNIS:\nZeit: ${time.toFixed(2)}s\nSpeed: ${kmh.toFixed(1)} km/h`);
-                        document.getElementById('ui-person').style.opacity = "1";
+                        const speed = (parseFloat(document.getElementById('dist').value) / time) * 3.6;
+                        alert(`ZIEL ERREICHT!\n\nZeit: ${time.toFixed(2)}s\nSpeed: ${speed.toFixed(1)} km/h`);
                     }
                 }
+            } else {
+                document.getElementById('ai-status').innerText = "SUCHE PERSON...";
+                document.getElementById('ai-status').className = "text-[10px] font-bold text-red-500 uppercase";
             }
         }
         requestAnimationFrame(animate);
