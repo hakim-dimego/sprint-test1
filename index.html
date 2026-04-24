@@ -2,188 +2,147 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>SprintTrack Pro | Hüft-Tracking</title>
-    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SprintTrack Pro | Final Test</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
-    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
-
     <style>
-        body { margin: 0; background-color: #05050A; color: white; font-family: sans-serif; overflow: hidden; height: 100dvh; }
-        .glass { background: rgba(255, 255, 255, 0.08); backdrop-filter: blur(15px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        body { background: #050505; color: white; font-family: sans-serif; overflow: hidden; }
+        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
-        .detection-dot { filter: drop-shadow(0 0 5px #00F5FF); }
     </style>
 </head>
 <body>
 
-<div id="app" class="relative w-full h-full flex flex-col md:flex-row">
+<div class="relative w-full h-screen flex flex-col">
     <div class="relative flex-[3] bg-black">
         <video id="video" playsinline muted></video>
         <canvas id="canvas"></canvas>
-        
-        <div class="absolute top-6 left-6 z-50 flex gap-4">
-            <div class="glass px-4 py-2 rounded-2xl">
-                <span id="detection-status" class="text-[10px] font-bold text-red-500 uppercase">Keine Person</span>
-            </div>
-            <div id="speed-tag" class="hidden glass px-4 py-2 rounded-2xl border border-cyan-400">
-                <span id="live-speed" class="text-2xl font-black italic text-cyan-400">0.0</span>
-                <span class="text-[10px] opacity-50 ml-1 uppercase">km/h</span>
-            </div>
-        </div>
+        <div id="status" class="absolute top-5 left-5 glass px-4 py-2 rounded-full text-xs font-bold text-cyan-400">Warte auf Video...</div>
     </div>
 
-    <div class="flex-1 glass p-6 flex flex-col gap-6 border-l border-white/10 z-50">
-        <div>
-            <h1 class="text-xl font-black text-cyan-400">SPRINT ANALYSIS</h1>
-            <p class="text-[10px] opacity-50 uppercase tracking-widest">Top Speed Tracker</p>
+    <div class="flex-1 glass p-6 flex flex-col gap-4">
+        <div class="flex justify-between items-center">
+            <h1 class="text-xl font-black italic text-cyan-400">TOP SPEED TRACKER</h1>
+            <input type="file" id="file-input" hidden accept="video/*" onchange="handleFile(event)">
+            <button onclick="document.getElementById('file-input').click()" class="bg-white/10 px-4 py-2 rounded-lg text-xs font-bold uppercase">Video wählen</button>
         </div>
-
-        <div class="space-y-4">
-            <button onclick="document.getElementById('file-input').click()" class="w-full py-4 bg-white/5 border border-white/20 rounded-2xl font-bold text-xs uppercase">📁 Video auswählen</button>
-            <input type="file" id="file-input" hidden accept="video/*" onchange="handleFileUpload(event)">
-            
-            <div class="space-y-2">
-                <label class="text-[10px] font-bold opacity-40 uppercase tracking-widest">Körpergröße (m)</label>
-                <input type="number" id="user-height" value="1.80" step="0.01" class="w-full bg-white/10 rounded-xl py-3 px-4 text-cyan-400 font-bold outline-none border border-white/10 focus:border-cyan-400">
+        
+        <div class="flex gap-4 items-center">
+            <div class="flex-1">
+                <label class="text-[10px] uppercase opacity-50 block mb-1">Körpergröße (m)</label>
+                <input type="number" id="user-height" value="1.80" step="0.01" class="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-cyan-400 outline-none">
             </div>
-        </div>
-
-        <div class="mt-auto space-y-3">
-            <p class="text-[10px] opacity-40 italic text-center leading-tight">Das Video sollte nur den Sprint enthalten (vorher am iPhone zuschneiden!)</p>
-            <button id="run-btn" onclick="startAnalysis()" class="w-full py-6 bg-cyan-500 rounded-3xl text-black font-black text-lg uppercase tracking-widest shadow-2xl shadow-cyan-500/40 transition-all active:scale-95">Start Analyse</button>
+            <button id="run-btn" onclick="startAnalysis()" class="flex-[2] bg-cyan-500 text-black py-4 rounded-xl font-black uppercase tracking-widest shadow-lg shadow-cyan-500/30">Analyse Starten</button>
         </div>
     </div>
 </div>
 
-<div id="result-overlay" class="hidden fixed inset-0 z-[100] bg-black/95 flex items-center justify-center">
-    <div class="text-center">
-        <div class="w-72 h-[400px] rounded-[3rem] bg-gradient-to-br from-yellow-300 via-yellow-500 to-amber-600 p-10 text-slate-900 shadow-2xl">
-            <h2 id="card-pace" class="text-8xl font-black italic leading-none">0</h2>
-            <p class="text-2xl font-bold italic uppercase">PAC</p>
-            <div class="mt-24 border-b-2 border-black/20 text-2xl font-black italic pb-2 uppercase">Sprinter</div>
-            <p id="res-kmh" class="mt-4 font-black text-xl">0.0 KM/H</p>
-        </div>
-        <button onclick="location.reload()" class="mt-10 py-4 px-12 bg-white/10 border border-white/20 rounded-full font-bold uppercase">Neuer Versuch</button>
+<div id="result" class="hidden fixed inset-0 z-[100] bg-black/90 flex items-center justify-center">
+    <div class="bg-gradient-to-br from-yellow-400 to-amber-600 p-10 rounded-[3rem] text-center text-slate-900 shadow-2xl">
+        <h2 id="pace" class="text-8xl font-black italic">0</h2>
+        <p class="text-xl font-bold uppercase">PAC (Top Speed)</p>
+        <p id="kmh" class="text-2xl font-black mt-4 border-t border-black/20 pt-4">0.0 KM/H</p>
+        <button onclick="location.reload()" class="mt-8 bg-black text-white px-8 py-3 rounded-full font-bold uppercase text-xs">Neu starten</button>
     </div>
 </div>
 
 <script>
-    const state = { detector: null, isRunning: false, peakKmh: 0, lastPos: null, lastTime: null };
+    let detector, isRunning = false, peakKmh = 0, lastPos = null, lastTime = null;
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
 
     async function init() {
-        // Starkes Modell für bessere Erkennung
-        state.detector = await poseDetection.createDetector(
-            poseDetection.SupportedModels.BlazePose, 
-            { runtime: 'tfjs', modelType: 'full' } 
-        );
-        document.getElementById('detection-status').innerText = "Bereit zum Upload";
-        render();
+        // "MoveNet" ist schneller als BlazePose und oft besser für Web-Apps auf iPhones
+        detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, { modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER });
+        document.getElementById('status').innerText = "Bereit";
+        loop();
     }
 
-    function handleFileUpload(e) {
+    function handleFile(e) {
         const file = e.target.files[0];
         if (file) {
             video.src = URL.createObjectURL(file);
             video.onloadedmetadata = () => {
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
+                document.getElementById('status').innerText = "Video geladen";
             };
         }
     }
 
     function startAnalysis() {
-        if (!video.src) return alert("Wähle ein Video!");
+        if (!video.src) return;
         video.currentTime = 0;
-        state.peakKmh = 0;
-        state.isRunning = true;
-        document.getElementById('speed-tag').classList.remove('hidden');
+        peakKmh = 0;
+        isRunning = true;
         video.play();
     }
 
-    function render() {
+    async function loop() {
         if (video.readyState >= 2) {
-            state.detector.estimatePoses(video).then(poses => {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                
-                if (poses && poses[0]) {
-                    const pose = poses[0];
-                    updateStatus(true);
-                    drawTracker(pose);
-                    if (state.isRunning) processSpeed(pose);
-                } else {
-                    updateStatus(false);
-                }
-            });
+            const poses = await detector.estimatePoses(video);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            if (state.isRunning && video.ended) {
-                state.isRunning = false;
+            if (poses && poses[0]) {
+                const pose = poses[0];
+                draw(pose);
+                if (isRunning) calculate(pose);
+                document.getElementById('status').innerText = "Person erkannt";
+            } else {
+                document.getElementById('status').innerText = "Suche Person...";
+            }
+
+            if (isRunning && video.ended) {
+                isRunning = false;
                 showResult();
             }
         }
-        requestAnimationFrame(render);
+        requestAnimationFrame(loop);
     }
 
-    function updateStatus(found) {
-        const status = document.getElementById('detection-status');
-        if (found) {
-            status.innerText = "Person erkannt";
-            status.classList.replace('text-red-500', 'text-cyan-400');
-        } else {
-            status.innerText = "Suche Person...";
-            status.classList.replace('text-cyan-400', 'text-red-500');
+    function calculate(pose) {
+        const k = pose.keypoints;
+        const h = parseFloat(document.getElementById('user-height').value) || 1.80;
+        
+        // Nutze den Abstand zwischen Schulter und Knöchel für die Skalierung (stabiler als ganze Größe)
+        const shoulder = k.find(p => p.name === 'left_shoulder' || p.name === 'right_shoulder');
+        const ankle = k.find(p => p.name === 'left_ankle' || p.name === 'right_ankle');
+        const hip = k.find(p => p.name === 'left_hip' || p.name === 'right_hip');
+
+        if (shoulder && ankle && hip && shoulder.score > 0.3 && ankle.score > 0.3) {
+            const pxH = Math.abs(ankle.y - shoulder.y);
+            const curX = hip.x;
+            const now = video.currentTime;
+
+            if (lastPos && now !== lastTime) {
+                const dt = now - lastTime;
+                const dx = Math.abs(curX - lastPos);
+                const kmh = ((dx / (pxH / (h * 0.75))) / dt) * 3.6; // 0.75 Korrekturfaktor Schulter-Ankle
+
+                if (kmh < 45 && kmh > 2) peakKmh = Math.max(peakKmh, kmh);
+            }
+            lastPos = curX;
+            lastTime = now;
         }
     }
 
-    function drawTracker(pose) {
+    function draw(pose) {
         ctx.fillStyle = "#00F5FF";
-        // Zeichne nur die Hüfte - das stabilste Zentrum
-        const points = [23, 24]; // Linke & rechte Hüfte
-        points.forEach(i => {
-            const kp = pose.keypoints[i];
-            if (kp.score > 0.5) {
-                ctx.beginPath();
-                ctx.arc(kp.x, kp.y, 10, 0, Math.PI * 2);
-                ctx.fill();
+        pose.keypoints.forEach(kp => {
+            if (kp.score > 0.3) {
+                ctx.beginPath(); ctx.arc(kp.x, kp.y, 6, 0, Math.PI*2); ctx.fill();
             }
         });
     }
 
-    function processSpeed(pose) {
-        const k = pose.keypoints;
-        const h = parseFloat(document.getElementById('user-height').value) || 1.80;
-        
-        // Pixel-Größe basierend auf Körper (Schulter bis Fuß)
-        const pxHeight = Math.abs(((k[27].y + k[28].y)/2) - ((k[11].y + k[12].y)/2));
-        const curX = (k[23].x + k[24].x) / 2; // Hüft-Zentrum
-        const now = video.currentTime;
-
-        if (state.lastPos && now !== state.lastTime && pxHeight > 30) {
-            const dt = now - state.lastTime;
-            const dx = Math.abs(curX - state.lastPos);
-            const meters = dx / (pxHeight / h);
-            const kmh = (meters / dt) * 3.6;
-
-            if (kmh < 50 && kmh > 0.5) {
-                state.peakKmh = Math.max(state.peakKmh, kmh);
-                document.getElementById('live-speed').innerText = kmh.toFixed(1);
-            }
-        }
-        state.lastPos = curX;
-        state.lastTime = now;
-    }
-
     function showResult() {
-        const pace = Math.min(99, Math.round(((state.peakKmh - 15) / 23) * 57 + 40));
-        document.getElementById('card-pace').innerText = pace;
-        document.getElementById('res-kmh').innerText = state.peakKmh.toFixed(1) + " KM/H";
-        document.getElementById('result-overlay').classList.remove('hidden');
-        confetti({ particleCount: 150, spread: 70 });
+        const pace = Math.min(99, Math.round(((peakKmh - 15) / 23) * 57 + 40));
+        document.getElementById('pace').innerText = pace;
+        document.getElementById('kmh').innerText = peakKmh.toFixed(1) + " KM/H";
+        document.getElementById('result').classList.remove('hidden');
     }
 
     init();
