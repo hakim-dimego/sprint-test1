@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>SprintTrack Pro | Fixed UI</title>
+    <title>SprintTrack Pro | Auto-Sync</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
@@ -14,103 +14,71 @@
         body { margin: 0; background-color: #05050A; color: white; font-family: sans-serif; overflow: hidden; height: 100dvh; }
         .glass { background: rgba(255, 255, 255, 0.08); backdrop-filter: blur(15px); border: 1px solid rgba(255, 255, 255, 0.1); }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
-        
-        /* EXTREMER SCHIEBEREGLER */
-        #video-seeker {
-            -webkit-appearance: none;
-            width: 100%;
-            height: 20px; /* Schön dick */
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            outline: none;
-            border: 1px solid rgba(0, 245, 255, 0.3);
-        }
-        #video-seeker::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 30px;
-            height: 30px;
-            background: #00F5FF;
-            border-radius: 50%;
-            cursor: pointer;
-            box-shadow: 0 0 15px rgba(0, 245, 255, 0.8);
-        }
-
-        .marker-set { background: #00F5FF !important; color: #000 !important; font-weight: 900; }
+        .neon-border { border: 1px solid #00F5FF; box-shadow: 0 0 15px rgba(0, 245, 255, 0.3); }
     </style>
 </head>
 <body>
 
-<div id="app-container" class="relative w-full h-full flex flex-col lg:flex-row">
+<div id="app-container" class="relative w-full h-full flex flex-col md:flex-row">
     
-    <div class="relative flex-[3] bg-black flex flex-col">
-        <div id="video-viewport" class="relative flex-1 overflow-hidden border-b border-white/10">
-            <video id="video" playsinline muted></video>
-            <canvas id="canvas"></canvas>
-            
-            <div id="status-tag" class="absolute top-4 left-4 glass px-3 py-1 rounded-full text-[10px] font-bold text-cyan-400 z-50 uppercase">Bereit</div>
-            
-            <div id="speed-bubble" class="hidden absolute top-4 right-4 glass p-4 rounded-2xl text-right z-50">
-                <span id="live-speed" class="text-4xl font-black italic text-cyan-400">0.0</span>
-                <span class="text-[8px] block opacity-50 font-bold uppercase">KM/H</span>
+    <div class="relative flex-[2] bg-black border-r border-white/10">
+        <video id="video" playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        
+        <div id="status-overlay" class="absolute inset-0 flex items-center justify-center bg-black/60 z-50">
+            <div class="text-center p-6 glass rounded-3xl neon-border">
+                <p id="status-text" class="text-cyan-400 font-black uppercase tracking-widest">Video bereitstellen</p>
+                <p class="text-[10px] opacity-60 mt-2">Tipp: Schneide das Video vorher in deiner Fotos-App!</p>
             </div>
         </div>
 
-        <div class="glass p-6 space-y-4">
-            <div class="flex items-center gap-4">
-                <span class="text-[10px] font-mono text-cyan-400" id="time-current">00:00</span>
-                <input type="range" id="video-seeker" min="0" value="0" step="0.01">
-                <span class="text-[10px] font-mono opacity-50" id="time-total">00:00</span>
-            </div>
-            <div class="flex justify-center gap-4">
-                <button onclick="togglePlay()" class="px-8 py-2 bg-white/10 rounded-full text-xs font-bold uppercase">Play / Pause</button>
-            </div>
+        <div id="speed-display" class="hidden absolute top-6 right-6 glass p-6 rounded-3xl text-right z-50">
+            <span id="live-speed" class="text-6xl font-black italic text-cyan-400">0.0</span>
+            <span class="text-xs block font-bold opacity-50 uppercase tracking-widest">KM/H</span>
         </div>
     </div>
 
-    <div class="flex-1 glass p-6 flex flex-col gap-6 border-l border-white/10 overflow-y-auto">
-        <div class="border-b border-white/10 pb-4">
-            <h1 class="text-xl font-black text-cyan-400 italic">SPRINTTRACK PRO</h1>
-            <p class="text-[9px] opacity-50 tracking-widest uppercase">Video Motion Analysis</p>
+    <div class="flex-1 glass p-8 flex flex-col gap-8">
+        <div>
+            <h1 class="text-2xl font-black italic text-cyan-400 uppercase">SprintTrack</h1>
+            <div class="h-1 w-12 bg-cyan-400 mt-1"></div>
         </div>
-
-        <button onclick="document.getElementById('file-input').click()" class="w-full py-4 border-2 border-dashed border-white/20 rounded-2xl text-xs font-bold uppercase hover:bg-white/5 transition-all">📁 Video hochladen</button>
-        <input type="file" id="file-input" hidden accept="video/*" onchange="handleFileUpload(event)">
 
         <div class="space-y-4">
-            <h3 class="text-[10px] font-black opacity-40 uppercase tracking-widest">Analyse-Bereich</h3>
-            <div class="grid grid-cols-2 gap-3">
-                <button id="btn-start" onclick="setMarker('start')" class="py-4 bg-white/5 border border-white/10 rounded-xl text-[10px] font-bold uppercase">Start setzen</button>
-                <button id="btn-end" onclick="setMarker('end')" class="py-4 bg-white/5 border border-white/10 rounded-xl text-[10px] font-bold uppercase">Ende setzen</button>
-            </div>
-            <p class="text-[8px] opacity-40 italic text-center">Spule zum Start des Laufs und klicke "Start".</p>
+            <label class="text-[10px] font-black opacity-40 uppercase tracking-widest">Schritt 1: Video</label>
+            <button onclick="document.getElementById('file-input').click()" class="w-full py-5 bg-white/5 border border-white/10 rounded-2xl font-bold uppercase text-xs hover:bg-white/10 transition-all">📁 Geschnittenes Video wählen</button>
+            <input type="file" id="file-input" hidden accept="video/*" onchange="handleFileUpload(event)">
         </div>
 
-        <div class="space-y-2">
-            <label class="text-[10px] font-black opacity-40 uppercase tracking-widest">Deine Größe (m)</label>
-            <input type="number" id="user-height" value="1.80" step="0.01" class="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-cyan-400 font-bold outline-none focus:border-cyan-400">
+        <div class="space-y-4">
+            <label class="text-[10px] font-black opacity-40 uppercase tracking-widest">Schritt 2: Körpergröße (m)</label>
+            <input type="number" id="user-height" value="1.80" step="0.01" class="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-6 text-cyan-400 font-bold text-lg outline-none focus:neon-border">
         </div>
 
-        <button onclick="startAnalysis()" class="mt-auto py-5 bg-cyan-500 rounded-2xl text-black font-black text-sm uppercase tracking-widest shadow-xl shadow-cyan-500/30 active:scale-95 transition-all">Analyse Starten</button>
+        <button id="run-btn" onclick="startFullAnalysis()" class="mt-auto py-6 bg-cyan-500 rounded-3xl text-black font-black text-lg uppercase tracking-widest shadow-2xl shadow-cyan-500/40 active:scale-95 transition-all">Analyse Starten</button>
     </div>
 </div>
 
-<div id="result-overlay" class="hidden fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center">
-    <div id="fc-card" class="relative w-64 h-96 rounded-[2rem] bg-gradient-to-br from-yellow-300 to-amber-600 p-8 text-slate-900 text-center shadow-[0_0_60px_rgba(255,200,0,0.4)]">
-        <h2 id="card-pace" class="text-7xl font-black italic">0</h2>
-        <p class="text-xl font-bold italic -mt-2">PAC</p>
-        <div class="mt-16 border-b-2 border-black/20 text-2xl font-black pb-2 italic">SPRINTER</div>
-        <p id="res-kmh" class="mt-4 font-bold text-lg">0.0 KM/H</p>
+<div id="result-overlay" class="hidden fixed inset-0 z-[100] bg-black/95 backdrop-blur-2xl flex items-center justify-center">
+    <div class="text-center">
+        <div id="fc-card" class="w-72 h-[420px] rounded-[3rem] bg-gradient-to-br from-yellow-200 via-yellow-400 to-amber-600 p-10 text-slate-900 shadow-[0_0_80px_rgba(255,215,0,0.4)]">
+            <h2 id="card-pace" class="text-8xl font-black italic leading-none">0</h2>
+            <p class="text-2xl font-bold italic uppercase">PAC</p>
+            <div class="mt-20 border-b-2 border-black/20 text-3xl font-black italic pb-2 uppercase tracking-tighter">Sprinter</div>
+            <p id="res-kmh" class="mt-4 font-black text-xl opacity-80">0.0 KM/H</p>
+        </div>
+        <button onclick="location.reload()" class="mt-12 py-4 px-12 bg-white/10 border border-white/20 rounded-full font-bold uppercase tracking-widest">Neuer Sprint</button>
     </div>
-    <button onclick="location.reload()" class="mt-10 py-4 px-12 bg-cyan-500 text-black rounded-full font-black uppercase">Nochmal</button>
 </div>
 
 <script>
-    const state = { detector: null, startTime: 0, endTime: 0, peakKmh: 0, isAnalyzing: false, lastPos: null, lastTime: null };
+    const state = { detector: null, isRunning: false, peakKmh: 0, lastPos: null, lastTime: null };
     const video = document.getElementById('video');
-    const seeker = document.getElementById('video-seeker');
+    const statusText = document.getElementById('status-text');
 
     async function init() {
         state.detector = await poseDetection.createDetector(poseDetection.SupportedModels.BlazePose, { runtime: 'tfjs', modelType: 'lite' });
+        statusText.innerText = "Bereit zum Upload";
         render();
     }
 
@@ -118,43 +86,26 @@
         const file = e.target.files[0];
         if (file) {
             video.src = URL.createObjectURL(file);
-            video.onloadedmetadata = () => {
-                seeker.max = video.duration;
-                document.getElementById('time-total').innerText = formatTime(video.duration);
-            };
+            document.getElementById('status-overlay').classList.add('hidden');
+            statusText.innerText = "Video geladen";
         }
     }
 
-    seeker.addEventListener('input', () => { video.currentTime = seeker.value; });
-    video.addEventListener('timeupdate', () => { if(!state.isAnalyzing) { seeker.value = video.currentTime; document.getElementById('time-current').innerText = formatTime(video.currentTime); } });
-
-    function togglePlay() { video.paused ? video.play() : video.pause(); }
-
-    function setMarker(type) {
-        if (type === 'start') {
-            state.startTime = video.currentTime;
-            document.getElementById('btn-start').innerText = "Start: " + video.currentTime.toFixed(1) + "s";
-            document.getElementById('btn-start').classList.add('marker-set');
-        } else {
-            state.endTime = video.currentTime;
-            document.getElementById('btn-end').innerText = "Ende: " + video.currentTime.toFixed(1) + "s";
-            document.getElementById('btn-end').classList.add('marker-set');
-        }
-    }
-
-    function startAnalysis() {
-        if (state.endTime <= state.startTime) return alert("Fehler: Setze zuerst Start und Ende!");
-        video.currentTime = state.startTime;
-        state.isAnalyzing = true;
+    function startFullAnalysis() {
+        if (!video.src) return alert("Wähle zuerst ein Video!");
+        video.currentTime = 0;
+        state.isRunning = true;
         state.peakKmh = 0;
-        document.getElementById('speed-bubble').classList.remove('hidden');
+        state.lastPos = null;
+        document.getElementById('speed-display').classList.remove('hidden');
         video.play();
     }
 
     function render() {
         if (video.readyState >= 2) {
-            if (state.isAnalyzing && video.currentTime >= state.endTime) {
-                state.isAnalyzing = false; video.pause(); showResult();
+            if (state.isRunning && video.ended) {
+                state.isRunning = false;
+                showResult();
             }
             state.detector.estimatePoses(video).then(poses => {
                 const canvas = document.getElementById('canvas');
@@ -163,14 +114,14 @@
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 if (poses[0]) {
                     drawPose(ctx, poses[0]);
-                    if (state.isAnalyzing) calculateSpeed(poses[0]);
+                    if (state.isRunning) analyze(poses[0]);
                 }
             });
         }
         requestAnimationFrame(render);
     }
 
-    function calculateSpeed(pose) {
+    function analyze(pose) {
         const k = pose.keypoints;
         const h = parseFloat(document.getElementById('user-height').value) || 1.80;
         const pxH = Math.abs(((k[27].y + k[28].y)/2) - ((k[11].y + k[12].y)/2));
@@ -180,10 +131,10 @@
         if (state.lastPos && now !== state.lastTime && pxH > 20) {
             const dt = now - state.lastTime;
             const dx = Math.abs(curX - state.lastPos);
-            const speed = ((dx / (pxH / h)) / dt) * 3.6;
-            if (speed < 55) {
-                state.peakKmh = Math.max(state.peakKmh, speed);
-                document.getElementById('live-speed').innerText = speed.toFixed(1);
+            const kmh = ((dx / (pxH / h)) / dt) * 3.6;
+            if (kmh > 1 && kmh < 50) {
+                state.peakKmh = Math.max(state.peakKmh, kmh);
+                document.getElementById('live-speed').innerText = kmh.toFixed(1);
             }
         }
         state.lastPos = curX; state.lastTime = now;
@@ -194,7 +145,7 @@
         [11, 12, 23, 24, 27, 28].forEach(i => {
             const kp = pose.keypoints[i];
             if (kp.score > 0.5) {
-                ctx.beginPath(); ctx.arc(kp.x, kp.y, 6, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(kp.x, kp.y, 8, 0, Math.PI*2); ctx.fill();
             }
         });
     }
@@ -204,12 +155,7 @@
         document.getElementById('card-pace').innerText = pace;
         document.getElementById('res-kmh').innerText = state.peakKmh.toFixed(1) + " KM/H";
         document.getElementById('result-overlay').classList.remove('hidden');
-        confetti({ particleCount: 150, spread: 70 });
-    }
-
-    function formatTime(s) {
-        const m = Math.floor(s/60); const sec = Math.floor(s%60);
-        return (m<10?"0"+m:m)+":"+(sec<10?"0"+sec:sec);
+        confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
     }
 
     init();
