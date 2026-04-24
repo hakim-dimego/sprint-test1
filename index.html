@@ -3,79 +3,88 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SprintEditor | Frame-Precision</title>
+    <title>SprintTrack | Live & Editor</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background: #000; color: #fff; font-family: sans-serif; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
-        .viewport { position: relative; flex: 1; background: #050505; display: flex; flex-direction: column; justify-content: center; }
-        video { width: 100%; max-height: 50dvh; }
-        
-        /* Fortschrittsbalken mit Markern */
-        .timeline-container { position: relative; width: 100%; height: 40px; background: #111; margin-top: 10px; }
-        #seeker { position: absolute; width: 100%; top: 0; z-index: 20; height: 100%; opacity: 0.3; cursor: pointer; }
-        .track { position: absolute; top: 50%; left: 0; right: 0; height: 4px; background: #333; transform: translateY(-50%); }
-        .marker { position: absolute; top: 0; bottom: 0; width: 4px; z-index: 10; pointer-events: none; }
-        .marker-start { background: #00f5ff; box-shadow: 0 0 10px #00f5ff; }
-        .marker-end { background: #ff3b30; box-shadow: 0 0 10px #ff3b30; }
-        
-        .glass-ui { background: rgba(20, 20, 25, 0.95); backdrop-filter: blur(20px); border-top: 1px solid rgba(255, 255, 255, 0.1); }
-        .btn-frame { background: #222; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 12px; font-weight: bold; }
+        .viewport-container { position: relative; flex: 1; background: #000; display: flex; align-items: center; justify-content: center; }
+        video, canvas { width: 100%; height: 100%; object-fit: contain; }
+        .live-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
+        .btn-trigger { pointer-events: auto; width: 100%; height: 40%; background: rgba(0, 245, 255, 0.1); border: 2px dashed rgba(0, 245, 255, 0.3); display: flex; align-items: center; justify-content: center; font-weight: 900; text-transform: uppercase; color: #00f5ff; }
+        .active-trigger { background: rgba(0, 245, 255, 0.4) !important; border-style: solid !important; }
+        .glass-nav { background: rgba(15, 15, 20, 0.9); backdrop-filter: blur(10px); border-top: 1px solid rgba(255,255,255,0.1); }
     </style>
 </head>
 <body>
 
-    <div class="p-4 flex justify-between items-center border-b border-white/10">
-        <h1 class="text-cyan-400 font-black italic uppercase text-xs tracking-widest">Frame Precision v2</h1>
-        <div class="flex gap-4 items-baseline">
-            <span id="speed-res" class="text-2xl font-black text-cyan-400">0.0</span>
-            <span class="text-[10px] opacity-50 font-bold uppercase">km/h</span>
+    <div class="p-4 flex justify-between items-center bg-zinc-900 border-b border-white/10 z-50">
+        <select id="mode" onchange="switchMode()" class="bg-transparent text-cyan-400 font-black uppercase text-xs outline-none">
+            <option value="upload">📁 Video Analyse</option>
+            <option value="live">🔴 Live Kamera</option>
+        </select>
+        <div id="display" class="text-2xl font-black italic">0.00s</div>
+    </div>
+
+    <div class="viewport-container">
+        <video id="video" playsinline muted></video>
+        
+        <div id="live-ui" class="live-overlay hidden p-4">
+            <div id="trigger-start" class="btn-trigger rounded-3xl" onclick="trigger('start')">Start Trigger</div>
+            <div id="trigger-end" class="btn-trigger rounded-3xl" onclick="trigger('end')">Ziel Trigger</div>
         </div>
     </div>
 
-    <div class="viewport">
-        <video id="video" playsinline preload="auto"></video>
-        
-        <div class="timeline-container px-4">
-            <div class="relative h-full w-full">
-                <div class="track"></div>
-                <div id="m-start" class="marker marker-start hidden"></div>
-                <div id="m-end" class="marker marker-end hidden"></div>
-                <input type="range" id="seeker" value="0" step="0.0001" oninput="updateSeek()">
+    <div class="glass-nav p-6 space-y-4 z-50">
+        <div id="upload-controls" class="space-y-4">
+            <input type="range" id="seeker" class="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-cyan-400" step="0.001" oninput="v.currentTime = this.value">
+            <div class="flex gap-2">
+                <button onclick="v.currentTime -= 0.033" class="flex-1 bg-zinc-800 py-3 rounded-xl font-bold">- Frame</button>
+                <button onclick="markUpload('start')" class="flex-1 bg-cyan-500 text-black py-3 rounded-xl font-black text-xs uppercase">Start setzen</button>
+                <button onclick="markUpload('end')" class="flex-1 bg-red-500 text-white py-3 rounded-xl font-black text-xs uppercase">Ziel setzen</button>
+                <button onclick="v.currentTime += 0.033" class="flex-1 bg-zinc-800 py-3 rounded-xl font-bold">+ Frame</button>
             </div>
         </div>
 
-        <div class="flex justify-center gap-6 p-4">
-            <button onclick="changeFrame(-1)" class="btn-frame">− Frame</button>
-            <div id="time-display" class="text-xl font-mono font-bold w-32 text-center text-white/80">0.000s</div>
-            <button onclick="changeFrame(1)" class="btn-frame">+ Frame</button>
-        </div>
-    </div>
-
-    <div class="glass-ui p-6 pb-10 space-y-6">
-        <div class="grid grid-cols-2 gap-4">
-            <button onclick="mark('start')" class="bg-cyan-500 text-black py-4 rounded-2xl font-black uppercase text-xs shadow-lg shadow-cyan-500/20">Start hier</button>
-            <button onclick="mark('end')" class="bg-red-500 text-white py-4 rounded-2xl font-black uppercase text-xs shadow-lg shadow-red-500/20">Ziel hier</button>
-        </div>
-
-        <div class="flex gap-4">
-            <button onclick="document.getElementById('file').click()" class="flex-1 bg-white/5 py-4 rounded-xl text-[10px] font-bold uppercase border border-white/10">📁 Video laden</button>
-            <input type="file" id="file" hidden accept="video/*" onchange="load(event)">
+        <div class="flex gap-4 items-center">
+            <button onclick="document.getElementById('file').click()" id="load-btn" class="flex-1 bg-white/5 py-4 rounded-xl text-[10px] font-bold uppercase border border-white/10">Video wählen</button>
+            <input type="file" id="file" hidden accept="video/*" onchange="handleFile(event)">
             
-            <div class="w-24 bg-white/5 rounded-xl border border-white/10 flex flex-col items-center justify-center">
-                <span class="text-[8px] opacity-50 font-bold uppercase">Meter</span>
+            <div class="w-24 bg-white/5 rounded-xl border border-white/10 p-2 flex flex-col items-center">
+                <span class="text-[8px] opacity-50 font-bold uppercase">Distanz</span>
                 <input type="number" id="dist" value="20" class="bg-transparent text-center font-bold text-cyan-400 w-full outline-none">
             </div>
+            <button onclick="resetAll()" class="px-4 py-4 bg-zinc-800 rounded-xl text-[10px] font-bold uppercase">Reset</button>
         </div>
-
-        <button onclick="calc()" class="w-full py-5 bg-white text-black font-black rounded-3xl uppercase tracking-[2px]">Berechnen</button>
     </div>
 
 <script>
     const v = document.getElementById('video');
     const s = document.getElementById('seeker');
-    let start = null, end = null;
+    let tStart = null, tEnd = null;
 
-    function load(e) {
+    async function switchMode() {
+        const mode = document.getElementById('mode').value;
+        resetAll();
+        if (mode === 'live') {
+            document.getElementById('live-ui').classList.remove('hidden');
+            document.getElementById('upload-controls').classList.add('hidden');
+            document.getElementById('load-btn').classList.add('hidden');
+            try {
+                v.srcObject = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                v.play();
+            } catch (e) { alert("Kamera-Zugriff verweigert"); }
+        } else {
+            document.getElementById('live-ui').classList.add('hidden');
+            document.getElementById('upload-controls').classList.remove('hidden');
+            document.getElementById('load-btn').classList.remove('hidden');
+            if (v.srcObject) {
+                v.srcObject.getTracks().forEach(t => t.stop());
+                v.srcObject = null;
+            }
+        }
+    }
+
+    function handleFile(e) {
         const f = e.target.files[0];
         if (f) {
             v.src = URL.createObjectURL(f);
@@ -83,37 +92,38 @@
         }
     }
 
-    function updateSeek() {
-        v.currentTime = s.value;
-        document.getElementById('time-display').innerText = v.currentTime.toFixed(3) + "s";
-    }
-
-    function changeFrame(dir) {
-        v.currentTime += (dir * 0.033); // Ca. 1 Frame bei 30fps
-        s.value = v.currentTime;
-        updateSeek();
-    }
-
-    function mark(type) {
-        const p = (v.currentTime / v.duration) * 100;
+    // LIVE LOGIC
+    function trigger(type) {
+        const now = performance.now();
         if (type === 'start') {
-            start = v.currentTime;
-            document.getElementById('m-start').style.left = p + '%';
-            document.getElementById('m-start').classList.remove('hidden');
-        } else {
-            end = v.currentTime;
-            document.getElementById('m-end').style.left = p + '%';
-            document.getElementById('m-end').classList.remove('hidden');
+            tStart = now;
+            document.getElementById('trigger-start').classList.add('active-trigger');
+        } else if (type === 'end' && tStart) {
+            tEnd = now;
+            document.getElementById('trigger-end').classList.add('active-trigger');
+            finish((tEnd - tStart) / 1000);
         }
     }
 
-    function calc() {
-        if (start === null || end === null) return alert("Beide Marker setzen!");
-        const diff = Math.abs(end - start);
+    // UPLOAD LOGIC
+    let uStart = null, uEnd = null;
+    function markUpload(type) {
+        if (type === 'start') uStart = v.currentTime;
+        else uEnd = v.currentTime;
+        if (uStart && uEnd) finish(Math.abs(uEnd - uStart));
+    }
+
+    function finish(seconds) {
         const d = parseFloat(document.getElementById('dist').value);
-        const kmh = (d / diff) * 3.6;
-        document.getElementById('speed-res').innerText = kmh.toFixed(1);
-        alert(`Zeit: ${diff.toFixed(3)}s\nGeschwindigkeit: ${kmh.toFixed(1)} km/h`);
+        const kmh = (d / seconds) * 3.6;
+        document.getElementById('display').innerText = seconds.toFixed(2) + "s";
+        alert(`ERGEBNIS:\nZeit: ${seconds.toFixed(3)}s\nSpeed: ${kmh.toFixed(1)} km/h`);
+    }
+
+    function resetAll() {
+        tStart = null; tEnd = null; uStart = null; uEnd = null;
+        document.getElementById('display').innerText = "0.00s";
+        document.querySelectorAll('.active-trigger').forEach(el => el.classList.remove('active-trigger'));
     }
 </script>
 </body>
